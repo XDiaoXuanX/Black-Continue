@@ -296,7 +296,8 @@ enum RowId { kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlu
              kDynamicMax, kDynamicHold, kAutoUpdate, kInfiniteMedkits, kTouchFireLook, kTouchAim, kSteadyAim, kAimView, kNoKick, kAdsCustom, kMaliFix,
              kEspHealth, kIgnoreAllies, kEspHeight, kEspOnRed, kEspOnGreen, kEspOnBlue, kEspOffRed, kEspOffGreen,
              kEspOffBlue, kAimAssist,
-             kCrosshair, kCrosshairMode, kCrosshairSize, kCrosshairRed, kCrosshairGreen, kCrosshairBlue };
+             kCrosshair, kCrosshairMode, kCrosshairSize, kCrosshairRed, kCrosshairGreen, kCrosshairBlue,
+             kRapidFireExtra };
 
 using rows::Kind;
 using rows::Row;
@@ -372,6 +373,7 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kInfiniteAmmo, "INFINITE AMMO"},
     {Kind::Value, kInfiniteGrenades, "INFINITE GRENADES"},
     {Kind::Value, kRapidFire, "RAPID FIRE"},
+    {Kind::Value, kRapidFireExtra, "RAPID FIRE EXTRA (RPG, GRL, SNR, GRENADE)"},
     {Kind::Value, kNoRecoil, "NO RECOIL"},
     {Kind::Value, kSteadyAim, "STEADY AIM"},
     {Kind::Value, kAimView, "AIM VIEW"},
@@ -491,6 +493,7 @@ bool* ToggleFlag(Settings& s, int id) {
         case kIgnoreAllies: return &o.ignore_allies;
         case kDynamicRes: return &o.dynamic_resolution;
         case kCrosshair: return &o.crosshair;
+        case kRapidFireExtra: return &o.rapid_fire_extra;
         default: return nullptr;
     }
 }
@@ -605,9 +608,10 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
     game::Options& o = game::Opt();
     switch (id) {
         case kRapidFire:
-            // off, then 2 to 4 times the rate
-            if (step) o.rapid_fire = uint32_t(StepRange(int(o.rapid_fire), 1, 4, 1, step));
+            // off, then 2 to 4 times the rate, then INFINITE (no wait at all)
+            if (step) o.rapid_fire = uint32_t(StepRange(int(o.rapid_fire), 1, 5, 1, step));
             if (o.rapid_fire <= 1) std::snprintf(text, sizeof(text), "OFF");
+            else if (o.rapid_fire >= 5) std::snprintf(text, sizeof(text), "INFINITE");
             else std::snprintf(text, sizeof(text), "%uX", o.rapid_fire);
             return true;
         case kAimView: {
@@ -859,6 +863,7 @@ void RestoreDefaults(int page) {
         game::Options none;
         o.infinite_ammo = none.infinite_ammo;
         o.rapid_fire = none.rapid_fire;
+        o.rapid_fire_extra = none.rapid_fire_extra;
         o.no_recoil = none.no_recoil;
         o.steady_aim = none.steady_aim;
         o.aim_view = none.aim_view;
@@ -905,6 +910,7 @@ void RestoreDefaults(int page) {
     // the cheats page has its own defaults
     o.infinite_ammo = keep.infinite_ammo;
     o.rapid_fire = keep.rapid_fire;
+    o.rapid_fire_extra = keep.rapid_fire_extra;
     o.no_recoil = keep.no_recoil;
     o.steady_aim = keep.steady_aim;
     o.aim_view = keep.aim_view;
