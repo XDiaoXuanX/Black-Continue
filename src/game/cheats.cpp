@@ -1,8 +1,10 @@
 // The cheats page's god mode, one-hit kill and infinite grenades. The rest live where the game
 // already has a hook: infinite ammo, rapid fire and no recoil with the weapon's, game speed with the frame time
 #include <algorithm>
+#include <cstring>
 
 #include "common/options.h"
+#include "core/log.h"
 #include "game/layout.h"
 #include "xdk/hle.h"
 
@@ -55,6 +57,31 @@ void Spare(const Doomed& kept) {
     if (health > 0) health = kept.health - (kSliver - health);
 }
 
+// diagnosis for a headshot that counts as one: the first hits of the player's, with the seven arguments of the
+// bullet call (hex and float, and three floats behind each that points into the guest) and the victim's feet.
+// Shoot an enemy in the head five times and in the body five, then send the log: the argument that differs is
+// the hit zone, the one that is a point on the body is where the bullet landed
+void LogHit(uint32_t victim, uint32_t attacker, uint32_t esp) {
+    static int logged = 0;
+    uint32_t me = Player();
+    if (logged >= 80 || !me || attacker != me || victim == me) return;
+    logged++;
+    const float* feet = &G<float>(victim + 0xA0);
+    LOGR("hit %d: victim %08X feet %.2f %.2f %.2f health %.1f", logged, victim, feet[0], feet[1], feet[2],
+         G<float>(victim + kCharHealth));
+    for (int i = 0; i < 7; i++) {
+        uint32_t v = R32(esp + 4 + 4 * i);
+        float f;
+        std::memcpy(&f, &v, 4);
+        if (v >= 0x10000 && v < 0x08000000) {
+            const float* p = &G<float>(v);
+            LOGR("hit %d arg %d: %08X (guest) -> %.3f %.3f %.3f", logged, i, v, p[0], p[1], p[2]);
+        } else {
+            LOGR("hit %d arg %d: %08X (%d, %.3f)", logged, i, v, int32_t(v), f);
+        }
+    }
+}
+
 bool g_invulnerable;  // the flag is ours, cleared when god mode goes off
 
 }  // namespace
@@ -85,6 +112,7 @@ X86_FUNC(sub_001E5FA0) {
 // characters' class, the player's has its own
 X86_EXTERN_FUNC(__imp__sub_001E74B0);
 X86_FUNC(sub_001E74B0) {
+    LogHit(ctx.ecx, R32(ctx.esp + 0x18), ctx.esp);
     Doomed doomed = Doom(ctx.ecx, R32(ctx.esp + 0x18));
     __imp__sub_001E74B0(ctx, base);
     Spare(doomed);
