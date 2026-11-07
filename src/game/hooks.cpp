@@ -814,17 +814,19 @@ X86_FUNC(sub_001EEFD0) {
     bool shot = Rounds(weapon) < rounds;
     RestoreAmmo(weapon, kept);
     uint32_t me = R32(weapon + kWeaponOwner);
-    // the rapid fire cheat: a shot's wait is that many times shorter (1 = OFF, 2-4 = the multiplier, 5 = INFINITE, no
-    // wait at all). RAPID FIRE EXTRA shortens the wait for RPG / Grenade Launcher / Walther 2000 (SNR) to nothing too,
-    // whatever the rapid fire level
-    uint32_t faster = std::clamp(game::Opt().rapid_fire, 1u, 5u);
-    bool instant = faster >= 5;
-    if (!instant && shot && me == Player() && game::Opt().rapid_fire_extra) {
+    // the rapid fire cheat: a shot's wait is that many times shorter. 1 = OFF, 2-998 = multiplier, 999 = INFINITE.
+    // RAPID FIRE EXTRA follows its own level for RPG / Grenade Launcher / Walther 2000 (SNR): its multiplier, or
+    // INFINITE at 999, whatever the RAPID FIRE level is
+    uint32_t rf  = std::clamp(game::Opt().rapid_fire, 1u, 999u);
+    uint32_t rfe = std::clamp(game::Opt().rapid_fire_extra, 1u, 999u);
+    bool extra = false;
+    if (shot && me == Player()) {
         uint32_t data = R32(weapon + kWeaponData);
         const char* name = data ? TableName(data) : nullptr;
-        if (name && (!std::strcmp(name, "RPG") || !std::strcmp(name, "GRL") || !std::strcmp(name, "SNR")))
-            instant = true;
+        extra = name && (!std::strcmp(name, "RPG") || !std::strcmp(name, "GRL") || !std::strcmp(name, "SNR"));
     }
+    uint32_t faster = extra ? rfe : rf;
+    bool instant = faster >= 999;
     if (shot && me == Player() && wait > 0) {
         if (instant) wait = 0.0001f;
         else wait /= float(faster);
@@ -961,7 +963,7 @@ X86_FUNC(sub_0017B130) {
     // RAPID FIRE EXTRA (grenades): a throw asked for a fast-forward (cheats.cpp's sub_001E8830). Capture the throw clip
     // now (before the update, so it is still the throw clip), then hold its time at its length so the animation completes
     // in one frame and the next grenade can be thrown
-    if (game::Opt().rapid_fire_extra) {
+    if (game::Opt().rapid_fire_extra > 1) {
         if (game::g_grenade_skip_request.exchange(false)) {
             std::string name = ReadCString(ac + kAnimName, 13);
             bool idle_name = name.size() >= 5 && name.compare(name.size() - 5, 5, "S_001") == 0;
@@ -983,7 +985,7 @@ X86_FUNC(sub_0017B130) {
     }
     __imp__sub_0017B130(ctx, base);
     // if the animation switched to another clip during the update, stop capping
-    if (game::Opt().rapid_fire_extra && game::g_grenade_skip_frames.load() > 0) {
+    if (game::Opt().rapid_fire_extra > 1 && game::g_grenade_skip_frames.load() > 0) {
         uint32_t now_clip = R32(ac + kAnimClip);
         if (now_clip != game::g_grenade_skip_clip.load()) game::g_grenade_skip_frames = 0;
     }
