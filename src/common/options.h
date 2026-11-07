@@ -82,9 +82,9 @@ struct Options {
 
     // rapid fire extra: the launchers fire at this multiplier (1 OFF, 2-998 = times the game's rate of fire,
     // 999 = INFINITE, no wait at all). Applies to RPG and GRL (all their fire) and to the M203 under the barrel of
-    // the BNS (only the launcher, the M16 rifle above it uses RAPID FIRE). Grenades thrown by hand also throw with
-    // no pause and the count is kept (the throw animation is skipped). Its own level, whatever RAPID FIRE is set to;
-    // RAPID FIRE EXTRA + INFINITE GRENADES is the same as RAPID FIRE EXTRA alone for thrown grenades
+    // the BNS (only the launcher, the M16 rifle above it uses RAPID FIRE). Like the grenade throw: the fire
+    // animation is fast-forwarded (its clip time held at its length), so the next shot can start at once, and the
+    // count of thrown grenades is kept (the throw animation is skipped). Its own level, whatever RAPID FIRE is set to
     uint32_t rapid_fire_extra = 1;
 
     std::map<std::string, std::string> keys;  // action id to key names, absent is the default
@@ -107,6 +107,13 @@ inline std::atomic<uint32_t> g_focus_pauses{0};  // focus pauses ended so far
 inline std::atomic<bool> g_grenade_skip_request{false};  // a throw happened, capture the clip on the next AC update
 inline std::atomic<uint32_t> g_grenade_skip_clip{0};     // the throw animation clip being fast-forwarded
 inline std::atomic<int> g_grenade_skip_frames{0};        // frames left to hold it at its end
+
+// rapid fire extra for the launchers (RPG, GRL, BNS M203): a shot was seen (hooks.cpp sets it), the animation
+// controller captures the fire clip (or whatever non-idle clip is playing) and holds its time at its length so
+// the fire animation completes in one frame and the next shot can start at once, exactly like the grenade throw
+inline std::atomic<bool> g_launcher_skip_request{false};  // a shot happened, capture the clip on the next AC update
+inline std::atomic<uint32_t> g_launcher_skip_clip{0};     // the fire animation clip being fast-forwarded
+inline std::atomic<int> g_launcher_skip_frames{0};        // frames left to hold it at its end
 
 void WaitWhileUnfocused();  // native/game_host.cpp: game thread, before the present
 bool HudShown();  // src/game/hud.cpp: the player's HUD drew lately, a hint's pause too
