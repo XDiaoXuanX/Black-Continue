@@ -295,7 +295,8 @@ enum RowId { kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlu
              kFog, kAntiAliasing, kHdr, kEsp, kAimbot, kTouchStick, kDynamicRes, kDynamicTarget, kDynamicMin,
              kDynamicMax, kDynamicHold, kAutoUpdate, kInfiniteMedkits, kTouchFireLook, kTouchAim, kSteadyAim, kAimView, kNoKick, kAdsCustom, kMaliFix,
              kEspHealth, kIgnoreAllies, kEspHeight, kEspOnRed, kEspOnGreen, kEspOnBlue, kEspOffRed, kEspOffGreen,
-             kEspOffBlue, kAimAssist };
+             kEspOffBlue, kAimAssist,
+             kCrosshair, kCrosshairMode, kCrosshairSize, kCrosshairRed, kCrosshairGreen, kCrosshairBlue };
 
 using rows::Kind;
 using rows::Row;
@@ -392,6 +393,13 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kEspOffBlue, "ESP OUT OF VIEW BLUE"},
     {Kind::Value, kAimbot, "AUTO HEADSHOT (WHILE AIMING IN)"},  // esp.cpp turns the view only at a zoom above 1
     {Kind::Value, kAimAssist, "AIM ASSIST"},
+    {Kind::Heading, -1, "CROSSHAIR"},
+    {Kind::Value, kCrosshair, "CROSSHAIR"},
+    {Kind::Value, kCrosshairMode, "CROSSHAIR MODE"},
+    {Kind::Value, kCrosshairSize, "CROSSHAIR SIZE"},
+    {Kind::Value, kCrosshairRed, "CROSSHAIR RED"},
+    {Kind::Value, kCrosshairGreen, "CROSSHAIR GREEN"},
+    {Kind::Value, kCrosshairBlue, "CROSSHAIR BLUE"},
     {Kind::Heading, -1, "GAME"},
     {Kind::Value, kGameSpeed, "GAME SPEED"},
     {Kind::Value, kUnlockLevels, "UNLOCK ALL MISSIONS"},
@@ -482,6 +490,7 @@ bool* ToggleFlag(Settings& s, int id) {
         case kEspHealth: return &o.esp_health;
         case kIgnoreAllies: return &o.ignore_allies;
         case kDynamicRes: return &o.dynamic_resolution;
+        case kCrosshair: return &o.crosshair;
         default: return nullptr;
     }
 }
@@ -635,6 +644,21 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
             if (step) o.game_speed = uint32_t(StepRange(int(o.game_speed), 25, 200, 25, step));
             std::snprintf(text, sizeof(text), o.game_speed == 100 ? "%u%% (DEFAULT)" : "%u%%", o.game_speed);
             return true;
+        case kCrosshairMode: {
+            // 0 dot (•), 1 cross (+), 2 star (*)
+            static constexpr uint32_t kValues[] = {0, 1, 2};
+            static const char* const kNames[] = {"DOT", "CROSS", "STAR"};
+            std::snprintf(text, sizeof(text), "%s", kNames[StepTable(kValues, o.crosshair_mode, step)]);
+            return true;
+        }
+        case kCrosshairSize:
+            // 50% to 300% in steps of 10
+            if (step) o.crosshair_size = uint32_t(StepRange(int(o.crosshair_size), 50, 300, 10, step));
+            std::snprintf(text, sizeof(text), "%u%%", o.crosshair_size);
+            return true;
+        case kCrosshairRed:   ColorChannel(o.crosshair_color, 0, step, text); return true;
+        case kCrosshairGreen: ColorChannel(o.crosshair_color, 1, step, text); return true;
+        case kCrosshairBlue:  ColorChannel(o.crosshair_color, 2, step, text); return true;
         default:
             return false;
     }
@@ -765,38 +789,38 @@ void StepInputRow(int id, int step, char (&text)[64]) {
             std::snprintf(text, sizeof(text), format, kLanguageNames[i]);
             break;
         }
-           case kAutoUpdate: {
-    // Mendapatkan lingkungan JNI dari SDL / Native Activity
-    JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
-    jobject activity = (jobject)SDL_GetAndroidActivity();
-    if (env && activity) {
-        jclass clazz = env->GetObjectClass(activity);
-        
-        // Membaca status saat ini dari SharedPreferences via Java method
-        jmethodID getMethod = env->GetStaticMethodID(clazz, "isStartupCheckEnabled", "(Landroid/content/Context;)Z");
-        bool auto_check = true;
-        if (getMethod) {
-            auto_check = env->CallStaticBooleanMethod(clazz, getMethod, activity);
-        }
+        case kAutoUpdate: {
+            // Mendapatkan lingkungan JNI dari SDL / Native Activity
+            JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+            jobject activity = (jobject)SDL_GetAndroidActivity();
+            if (env && activity) {
+                jclass clazz = env->GetObjectClass(activity);
 
-        // Jika tombol ditekan (step != 0), ubah statusnya (toggle)
-        if (step) {
-            auto_check = !auto_check;
-            jmethodID setMethod = env->GetStaticMethodID(clazz, "setStartupCheckEnabled", "(Landroid/content/Context;Z)V");
-            if (setMethod) {
-                env->CallStaticVoidMethod(clazz, setMethod, activity, (jboolean)auto_check);
+                // Membaca status saat ini dari SharedPreferences via Java method
+                jmethodID getMethod = env->GetStaticMethodID(clazz, "isStartupCheckEnabled", "(Landroid/content/Context;)Z");
+                bool auto_check = true;
+                if (getMethod) {
+                    auto_check = env->CallStaticBooleanMethod(clazz, getMethod, activity);
+                }
+
+                // Jika tombol ditekan (step != 0), ubah statusnya (toggle)
+                if (step) {
+                    auto_check = !auto_check;
+                    jmethodID setMethod = env->GetStaticMethodID(clazz, "setStartupCheckEnabled", "(Landroid/content/Context;Z)V");
+                    if (setMethod) {
+                        env->CallStaticVoidMethod(clazz, setMethod, activity, (jboolean)auto_check);
+                    }
+                }
+
+                env->DeleteLocalRef(clazz);
+                env->DeleteLocalRef(activity);
+
+                std::snprintf(text, sizeof(text), "%s", OnOff(auto_check));
+            } else {
+                std::snprintf(text, sizeof(text), "OFF");
             }
+            break;
         }
-        
-        env->DeleteLocalRef(clazz);
-        env->DeleteLocalRef(activity);
-        
-        std::snprintf(text, sizeof(text), "%s", OnOff(auto_check));
-    } else {
-        std::snprintf(text, sizeof(text), "OFF");
-    }
-    break;
-      }
     }
 }
 
@@ -855,6 +879,10 @@ void RestoreDefaults(int page) {
         o.esp_height = none.esp_height;
         o.esp_on_color = none.esp_on_color;
         o.esp_off_color = none.esp_off_color;
+        o.crosshair = none.crosshair;
+        o.crosshair_mode = none.crosshair_mode;
+        o.crosshair_size = none.crosshair_size;
+        o.crosshair_color = none.crosshair_color;
         Changed();
         return;
     }
@@ -897,6 +925,10 @@ void RestoreDefaults(int page) {
     o.esp_height = keep.esp_height;
     o.esp_on_color = keep.esp_on_color;
     o.esp_off_color = keep.esp_off_color;
+    o.crosshair = keep.crosshair;
+    o.crosshair_mode = keep.crosshair_mode;
+    o.crosshair_size = keep.crosshair_size;
+    o.crosshair_color = keep.crosshair_color;
     Changed();
 }
 
