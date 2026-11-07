@@ -786,12 +786,16 @@ static KeptAmmo KeepAmmo(uint32_t weapon) {
     return {ammo, R32(ammo + kAmmoTotal), G<uint16_t>(ammo + kAmmoClip)};
 }
 
+// rounds in one slot of the weapon: kWeaponAmmo for the main fire, kWeaponAltAmmo for the alternate fire
+// (the M203 grenades under the barrel of the BNS, the underbarrel of any other weapon that has one)
+static uint32_t RoundsOf(uint32_t weapon, uint32_t at) {
+    uint32_t ammo = R32(weapon + at);
+    return ammo ? R32(ammo + kAmmoTotal) : 0;
+}
+
 // the rounds a weapon has left in all: a shot of either barrel takes one (0x1EFBC5, 0x1EFEED)
 static uint32_t Rounds(uint32_t weapon) {
-    uint32_t rounds = 0;
-    for (uint32_t at : {kWeaponAmmo, kWeaponAltAmmo})
-        if (uint32_t ammo = R32(weapon + at)) rounds += R32(ammo + kAmmoTotal);
-    return rounds;
+    return RoundsOf(weapon, kWeaponAmmo) + RoundsOf(weapon, kWeaponAltAmmo);
 }
 
 static void RestoreAmmo(uint32_t weapon, const KeptAmmo& kept) {
@@ -809,21 +813,33 @@ X86_FUNC(sub_001EEFD0) {
     float rest = wait;
     float dt = Dt();
     KeptAmmo kept = KeepAmmo(weapon);
-    uint32_t rounds = Rounds(weapon);
+    uint32_t main_before = RoundsOf(weapon, kWeaponAmmo);
+    uint32_t alt_before  = RoundsOf(weapon, kWeaponAltAmmo);
+    uint32_t rounds = main_before + alt_before;
     __imp__sub_001EEFD0(ctx, base);
-    bool shot = Rounds(weapon) < rounds;
+    uint32_t main_after = RoundsOf(weapon, kWeaponAmmo);
+    uint32_t alt_after  = RoundsOf(weapon, kWeaponAltAmmo);
+    bool shot     = (main_after + alt_after) < rounds;
+    bool alt_shot = alt_after < alt_before;  // the launcher under the barrel fired (M203)
     RestoreAmmo(weapon, kept);
     uint32_t me = R32(weapon + kWeaponOwner);
     // the rapid fire cheat: a shot's wait is that many times shorter. 1 = OFF, 2-998 = multiplier, 999 = INFINITE.
-    // RAPID FIRE EXTRA follows its own level for RPG / Grenade Launcher / Walther 2000 (SNR): its multiplier, or
-    // INFINITE at 999, whatever the RAPID FIRE level is
+    // RAPID FIRE EXTRA follows its own level for the launchers: RPG and GRL (all their fire), and the M203 of the BNS
+    // (only the launcher under the barrel; the M16 rifle above it uses RAPID FIRE). Its multiplier, or INFINITE at 999,
+    // whatever the RAPID FIRE level is
     uint32_t rf  = std::clamp(game::Opt().rapid_fire, 1u, 999u);
     uint32_t rfe = std::clamp(game::Opt().rapid_fire_extra, 1u, 999u);
     bool extra = false;
     if (shot && me == Player()) {
         uint32_t data = R32(weapon + kWeaponData);
         const char* name = data ? TableName(data) : nullptr;
-        extra = name && (!std::strcmp(name, "RPG") || !std::strcmp(name, "GRL") || !std::strcmp(name, "SNR"));
+        if (name) {
+            if (!std::strcmp(name, "RPG") || !std::strcmp(name, "GRL")) {
+                extra = true;  // the whole weapon is a launcher
+            } else if (!std::strcmp(name, "BNS") && alt_shot) {
+                extra = true;  // only the M203 under the barrel
+            }
+        }
     }
     uint32_t faster = extra ? rfe : rf;
     bool instant = faster >= 999;
