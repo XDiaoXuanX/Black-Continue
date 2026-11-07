@@ -119,13 +119,20 @@ X86_FUNC(sub_001E74B0) {
 }
 
 // A character's animation event (64-bit hash, then a pointer to the character): the throw takes a grenade
-// (0x1E8934), the cheat puts the player's back
+// (0x1E8934), the cheat puts the player's back. RAPID FIRE EXTRA: a throw also keeps the count and asks the animation
+// controller to fast-forward the throw clip (hooks.cpp's sub_0017B130), so the next throw can start at once
 X86_EXTERN_FUNC(__imp__sub_001E8830);
 X86_FUNC(sub_001E8830) {
     uint32_t who = R32(ctx.esp + 0xC);
     uint32_t me = who ? R32(who) : 0;
-    bool keep = game::Opt().infinite_grenades && me && me == Player();
-    uint16_t grenades = keep ? G<uint16_t>(me + kCharGrenades) : 0;
+    bool is_player = me && me == Player();
+    uint16_t before = is_player ? G<uint16_t>(me + kCharGrenades) : 0;
+    // keep the count when either cheat wants it: INFINITE GRENADES, or RAPID FIRE EXTRA (which means "throw forever")
+    bool keep = is_player && (game::Opt().infinite_grenades || game::Opt().rapid_fire_extra);
     __imp__sub_001E8830(ctx, base);
-    if (keep && G<uint16_t>(me + kCharGrenades) < grenades) G<uint16_t>(me + kCharGrenades) = grenades;
+    uint16_t after = is_player ? G<uint16_t>(me + kCharGrenades) : 0;
+    bool thrown = is_player && after < before;
+    if (keep && thrown) G<uint16_t>(me + kCharGrenades) = before;
+    // RAPID FIRE EXTRA: fast-forward the throw animation so the next grenade can be thrown without waiting
+    if (thrown && game::Opt().rapid_fire_extra) game::g_grenade_skip_request = true;
 }

@@ -50,7 +50,8 @@ struct Options {
     uint32_t audio_output = 0;  // audio::kOutputAuto, kOutputStereo, kOutputSurround or kOutputMono
     std::string language = "int";  // one of kLanguages
     bool infinite_ammo = false;  // cheat: the player's magazine and reserve never go down
-    uint32_t rapid_fire = 1;  // cheat: times the player's rate of fire, 1 the game's
+    // cheat: 1 OFF, 2-4 = times the game's rate of fire, 5 = INFINITE (no wait at all, every weapon fires each frame)
+    uint32_t rapid_fire = 1;
     bool no_recoil = false;  // cheat: the player's shots do not kick the view
     bool steady_aim = true;  // the gun's idle sway is held still at the aim, every weapon (src/game/hooks.cpp); off: the game's own sway
     uint32_t aim_view = 1;  // the aim's look: 0 ZOOM (the game's own, no move of the gun), 1 ADS (the gun moves to the middle, src/game/hooks.cpp)
@@ -72,6 +73,18 @@ struct Options {
     uint32_t esp_height = 180;  // centimetres: the ESP box's height, and what the head and body points are taken from
     uint32_t esp_on_color = 0x3CFF3C;   // 0xRRGGBB, the lines and boxes of the enemies in the view
     uint32_t esp_off_color = 0xFF3C3C;  // the arrows to the enemies out of it
+
+    // crosshair: a marker at the middle of the view, drawn with the ESP (src/game/esp.cpp)
+    bool crosshair = false;              // draw it at all
+    uint32_t crosshair_mode = 0;         // 0 dot (•), 1 cross (+), 2 star (*)
+    uint32_t crosshair_size = 100;       // percent of the base arm length (50..300)
+    uint32_t crosshair_color = 0x00FF00; // 0xRRGGBB, default green
+
+    // rapid fire extra: RPG, Grenade Launcher and Walther 2000 fire with no wait at all (like INFINITE rapid fire, per
+    // weapon); grenades throw with no pause and the count is kept (the throw animation is skipped). Works whatever the
+    // RAPID FIRE level; RAPID FIRE EXTRA + INFINITE GRENADES is the same as RAPID FIRE EXTRA alone for grenades
+    bool rapid_fire_extra = false;
+
     std::map<std::string, std::string> keys;  // action id to key names, absent is the default
 };
 Options& Opt();
@@ -86,6 +99,13 @@ inline std::atomic<bool> g_hide_hud{false};  // the toggle HUD key: the gameplay
 inline std::atomic<float> g_zoom{1.0f};
 inline std::atomic<bool> g_focus_paused{false};  // the game thread waits while the app is in the background
 inline std::atomic<uint32_t> g_focus_pauses{0};  // focus pauses ended so far
+
+// rapid fire extra for grenades: a throw was seen (cheats.cpp sets it), the animation controller (hooks.cpp) reads it
+// on its next update, captures the throw clip and holds its time at its length so the animation completes in one frame
+inline std::atomic<bool> g_grenade_skip_request{false};  // a throw happened, capture the clip on the next AC update
+inline std::atomic<uint32_t> g_grenade_skip_clip{0};     // the throw animation clip being fast-forwarded
+inline std::atomic<int> g_grenade_skip_frames{0};        // frames left to hold it at its end
+
 void WaitWhileUnfocused();  // native/game_host.cpp: game thread, before the present
 bool HudShown();  // src/game/hud.cpp: the player's HUD drew lately, a hint's pause too
 

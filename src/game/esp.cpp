@@ -60,6 +60,10 @@ constexpr float kAssistPull[] = {0.0f, 0.03f, 0.06f, 0.10f};  // of the turn to 
 constexpr float kDegrees = 180.0f / 3.14159265f;
 constexpr auto kFireHold = std::chrono::milliseconds(150);  // a fire request counts this long after it was seen
 
+// the crosshair: the arm's length and the line thickness, in lines of a 480 frame
+constexpr float kCrossBaseSize = 6.0f;
+constexpr float kCrossThickness = 1.5f;
+
 // an enemy is drawn while its update ran this recently: none once the game pauses, no flicker between ticks
 constexpr auto kSeen = std::chrono::milliseconds(250);
 constexpr size_t kMaxEnemies = 64;
@@ -325,12 +329,13 @@ void DrawEsp(X86Context& ctx, float unit) {
     uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
     float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
     float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
-    static const uint32_t buffer = mem::AllocSystem(kMaxVertices * sizeof(Vertex), 16);
-    static const uint32_t offset = mem::AllocSystem(8, 16);
+    static const uint32_t buffer  = mem::AllocSystem(kMaxVertices * sizeof(Vertex), 16);
+    static const uint32_t offset  = mem::AllocSystem(8, 16);
     static const uint32_t colours = mem::AllocSystem(kMaxVertices * 16, 16);
     Vertex* first = static_cast<Vertex*>(HostPtr(buffer));
     float(*colour)[4] = static_cast<float(*)[4]>(HostPtr(colours));
     Vertex* v = first;
+
     // a segment with a colour for each of its points
     auto add = [&](float x0, float y0, float x1, float y1, float width, const float rgba[4]) {
         size_t before = size_t(v - first);
@@ -406,6 +411,7 @@ void DrawEsp(X86Context& ctx, float unit) {
             add(left, y, right, y, bar, back);
             if (frac > 0) add(left, y, left + (right - left) * frac, y, bar, fill);
         }
+        g_count = kept;
     }
     g_count = kept;
     Publish(labels, labelled, on);
