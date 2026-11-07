@@ -71,6 +71,13 @@ struct Options {
     uint32_t esp_height = 180;  // centimetres: the ESP box's height, and what the head and body points are taken from
     uint32_t esp_on_color = 0x3CFF3C;   // 0xRRGGBB, the lines and boxes of the enemies in the view
     uint32_t esp_off_color = 0xFF3C3C;  // the arrows to the enemies out of it
+
+    // crosshair: a marker at the middle of the view, drawn with the ESP (src/game/esp.cpp)
+    bool crosshair = false;              // draw it at all
+    uint32_t crosshair_mode = 0;         // 0 dot (•), 1 cross (+), 2 star (*)
+    uint32_t crosshair_size = 100;       // percent of the base arm length (50..300)
+    uint32_t crosshair_color = 0x00FF00; // 0xRRGGBB, default green
+
     std::map<std::string, std::string> keys;  // action id to key names, absent is the default
 };
 Options& Opt();
