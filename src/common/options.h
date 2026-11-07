@@ -80,10 +80,11 @@ struct Options {
     uint32_t crosshair_size = 100;       // percent of the base arm length (50..300)
     uint32_t crosshair_color = 0x00FF00; // 0xRRGGBB, default green
 
-    // rapid fire extra: RPG, Grenade Launcher and Walther 2000 fire at this multiplier (1 OFF, 2-998 = times the
-    // game's rate of fire, 999 = INFINITE, no wait at all); grenades throw with no pause and the count is kept (the
-    // throw animation is skipped). Its own level, whatever RAPID FIRE is set to; RAPID FIRE EXTRA + INFINITE GRENADES
-    // is the same as RAPID FIRE EXTRA alone for grenades
+    // rapid fire extra: the launchers fire at this multiplier (1 OFF, 2-998 = times the game's rate of fire,
+    // 999 = INFINITE, no wait at all). Applies to RPG and GRL (all their fire) and to the M203 under the barrel of
+    // the BNS (only the launcher, the M16 rifle above it uses RAPID FIRE). Grenades thrown by hand also throw with
+    // no pause and the count is kept (the throw animation is skipped). Its own level, whatever RAPID FIRE is set to;
+    // RAPID FIRE EXTRA + INFINITE GRENADES is the same as RAPID FIRE EXTRA alone for thrown grenades
     uint32_t rapid_fire_extra = 1;
 
     std::map<std::string, std::string> keys;  // action id to key names, absent is the default
