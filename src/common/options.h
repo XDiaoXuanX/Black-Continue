@@ -50,7 +50,7 @@ struct Options {
     uint32_t audio_output = 0;  // audio::kOutputAuto, kOutputStereo, kOutputSurround or kOutputMono
     std::string language = "int";  // one of kLanguages
     bool infinite_ammo = false;  // cheat: the player's magazine and reserve never go down
-    // cheat: 1 OFF, 2-4 = times the game's rate of fire, 5 = INFINITE (no wait at all, every weapon fires each frame)
+    // cheat: 1 OFF, 2-998 = times the game's rate of fire, 999 = INFINITE (no wait at all, every weapon fires each frame)
     uint32_t rapid_fire = 1;
     bool no_recoil = false;  // cheat: the player's shots do not kick the view
     bool steady_aim = true;  // the gun's idle sway is held still at the aim, every weapon (src/game/hooks.cpp); off: the game's own sway
@@ -80,10 +80,11 @@ struct Options {
     uint32_t crosshair_size = 100;       // percent of the base arm length (50..300)
     uint32_t crosshair_color = 0x00FF00; // 0xRRGGBB, default green
 
-    // rapid fire extra: RPG, Grenade Launcher and Walther 2000 fire with no wait at all (like INFINITE rapid fire, per
-    // weapon); grenades throw with no pause and the count is kept (the throw animation is skipped). Works whatever the
-    // RAPID FIRE level; RAPID FIRE EXTRA + INFINITE GRENADES is the same as RAPID FIRE EXTRA alone for grenades
-    bool rapid_fire_extra = false;
+    // rapid fire extra: RPG, Grenade Launcher and Walther 2000 fire at this multiplier (1 OFF, 2-998 = times the
+    // game's rate of fire, 999 = INFINITE, no wait at all); grenades throw with no pause and the count is kept (the
+    // throw animation is skipped). Its own level, whatever RAPID FIRE is set to; RAPID FIRE EXTRA + INFINITE GRENADES
+    // is the same as RAPID FIRE EXTRA alone for grenades
+    uint32_t rapid_fire_extra = 1;
 
     std::map<std::string, std::string> keys;  // action id to key names, absent is the default
 };
