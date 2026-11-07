@@ -826,7 +826,9 @@ X86_FUNC(sub_001EEFD0) {
     // the rapid fire cheat: a shot's wait is that many times shorter. 1 = OFF, 2-998 = multiplier, 999 = INFINITE.
     // RAPID FIRE EXTRA follows its own level for the launchers: RPG and GRL (all their fire), and the M203 of the BNS
     // (only the launcher under the barrel; the M16 rifle above it uses RAPID FIRE). Its multiplier, or INFINITE at 999,
-    // whatever the RAPID FIRE level is
+    // whatever the RAPID FIRE level is. Like the grenade throw, the fire animation is also fast-forwarded: the request
+    // set below makes the animation controller (sub_0017B130) hold the fire clip's time at its length, so the game sees
+    // the animation as done and the next shot can start at once
     uint32_t rf  = std::clamp(game::Opt().rapid_fire, 1u, 999u);
     uint32_t rfe = std::clamp(game::Opt().rapid_fire_extra, 1u, 999u);
     bool extra = false;
@@ -843,6 +845,13 @@ X86_FUNC(sub_001EEFD0) {
     }
     uint32_t faster = extra ? rfe : rf;
     bool instant = faster >= 999;
+    // RAPID FIRE EXTRA (launchers): fast-forward the fire animation, exactly like the grenade throw. Set whenever a
+    // launcher shot lands with rapid_fire_extra > 1, whatever the RAPID FIRE level is. The animation controller
+    // captures the current non-idle clip on its next update and holds its time at its length, so the game sees the
+    // fire animation as done and allows the next shot at once (bottleneck becomes the frame rate, not the animation)
+    if (shot && me == Player() && extra && faster > 1) {
+        game::g_launcher_skip_request = true;
+    }
     if (shot && me == Player() && wait > 0) {
         if (instant) wait = 0.0001f;
         else wait /= float(faster);
@@ -976,10 +985,16 @@ X86_FUNC(sub_0017B130) {
     int16_t slot = G<int16_t>(clip + kAnimClipFadeSlot);
     uint32_t fade = clip + kAnimClipFades + slot * kFadeSize;
     g_kick_ac = ac;  // the fire clip's pose is held in sub_00097E00, the times of the clip are left alone here
-    // RAPID FIRE EXTRA (grenades): a throw asked for a fast-forward (cheats.cpp's sub_001E8830). Capture the throw clip
-    // now (before the update, so it is still the throw clip), then hold its time at its length so the animation completes
-    // in one frame and the next grenade can be thrown
+    // RAPID FIRE EXTRA: fast-forward the animation clip so the next action can start at once. Two independent tracks
+    // that work the same way:
+    //  - grenade throw: cheats.cpp's sub_001E8830 sets g_grenade_skip_request when the player throws one
+    //  - launcher fire: this file's sub_001EEFD0 sets g_launcher_skip_request when RPG / GRL / BNS M203 fires
+    // Both capture the current non-idle clip (never the idle clip S_001 by mistake) and hold its time (t14 at +0x14)
+    // at its length (+0x1C) so the game sees the animation as done and switches back to idle, allowing the next action
+    // at once. The capture lasts a few frames (10), enough to survive the transition, and stops early if the clip
+    // changes underneath (idle or another) so it can never stick
     if (game::Opt().rapid_fire_extra > 1) {
+        // ---- grenade throw ----
         if (game::g_grenade_skip_request.exchange(false)) {
             std::string name = ReadCString(ac + kAnimName, 13);
             bool idle_name = name.size() >= 5 && name.compare(name.size() - 5, 5, "S_001") == 0;
@@ -998,12 +1013,37 @@ X86_FUNC(sub_0017B130) {
                 game::g_grenade_skip_frames = 0;  // the clip changed (idle or another), stop capping
             }
         }
+        // ---- launcher fire (RPG, GRL, BNS M203) ----
+        if (game::g_launcher_skip_request.exchange(false)) {
+            std::string name = ReadCString(ac + kAnimName, 13);
+            bool idle_name = name.size() >= 5 && name.compare(name.size() - 5, 5, "S_001") == 0;
+            if (!idle_name) {  // never cap the idle clip by mistake
+                game::g_launcher_skip_clip = clip;
+                game::g_launcher_skip_frames = 10;
+            }
+        }
+        int lframes = game::g_launcher_skip_frames.load();
+        if (lframes > 0) {
+            if (clip == game::g_launcher_skip_clip.load()) {
+                float len = G<float>(clip + 0x1C);
+                if (len > 0) G<float>(clip + 0x14) = len;  // the game will see time >= length and switch to idle
+                game::g_launcher_skip_frames = lframes - 1;
+            } else {
+                game::g_launcher_skip_frames = 0;  // the clip changed (idle or another), stop capping
+            }
+        }
     }
     __imp__sub_0017B130(ctx, base);
     // if the animation switched to another clip during the update, stop capping
-    if (game::Opt().rapid_fire_extra > 1 && game::g_grenade_skip_frames.load() > 0) {
-        uint32_t now_clip = R32(ac + kAnimClip);
-        if (now_clip != game::g_grenade_skip_clip.load()) game::g_grenade_skip_frames = 0;
+    if (game::Opt().rapid_fire_extra > 1) {
+        if (game::g_grenade_skip_frames.load() > 0) {
+            uint32_t now_clip = R32(ac + kAnimClip);
+            if (now_clip != game::g_grenade_skip_clip.load()) game::g_grenade_skip_frames = 0;
+        }
+        if (game::g_launcher_skip_frames.load() > 0) {
+            uint32_t now_clip = R32(ac + kAnimClip);
+            if (now_clip != game::g_launcher_skip_clip.load()) game::g_launcher_skip_frames = 0;
+        }
     }
     {
         uint32_t now_clip = R32(ac + kAnimClip);
