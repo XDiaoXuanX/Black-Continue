@@ -38,10 +38,6 @@
 #include "kernel/memory.h"
 #include "vk_shader.h"
 
-namespace vkshader {
-void SetInline(bool on);
-}
-
 namespace gpu {
 
 namespace {
@@ -1161,7 +1157,6 @@ private:
     PFN_vkWaitSemaphoresKHR wait_semaphores_ = nullptr;
     PFN_vkGetSemaphoreCounterValueKHR counter_value_ = nullptr;
     bool dynamic_ = true;  // dynamic rendering; Vulkan 1.1 drivers (older Adrenos) only have render passes
-    void LoadMaliFix();
     bool timeline_ok_ = true;  // without it a fence per submit stands in for the timeline's values
     struct Pending {
         uint64_t value;
@@ -1244,16 +1239,6 @@ private:
         }                                                              \
     } while (0)
 
-// ---- Mali fix, the MALI FIX row of the graphics menu: 0 off, 1 auto (the shader fix on ARM's Mali only),
-// 2 shader fix, 3 glow passes dropped, 4 both. The shader fix is read here, as the renderer starts
-void VulkanBackend::LoadMaliFix() {
-    uint32_t mode = game::Opt().mali_fix;
-    bool mali = props_.vendorID == 0x13B5;
-    bool shaders = mode == 2 || mode == 4 || (mode == 1 && mali);
-    vkshader::SetInline(shaders);
-    LOGR("vulkan: vendor %04X, mali fix %u, shader fix %s", props_.vendorID, mode, shaders ? "on" : "off");
-}
-
 // ---- Init
 
 bool VulkanBackend::Init(uint32_t width, uint32_t height) {
@@ -1261,7 +1246,6 @@ bool VulkanBackend::Init(uint32_t width, uint32_t height) {
     guest_h_ = height;
     vkshader::Init(app::ExeDir() / "shadercache");
     if (!CreateInstance() || !CreateSurface() || !PickDevice() || !CreateDevice()) return false;
-    LoadMaliFix();
     alloc_.Init(pd_, dev_);
     if (!CreateLayouts() || !CreateFrames() || !CreateSwapchain() || !CreateFixedImages()) return false;
     Begin();
@@ -2865,7 +2849,7 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
 
     DrawTextures stages;
     if (!BindStageTextures(s, stages) || !draw_rt_ && !draw_ds_) return;
-    if ((!game::Opt().bloom || game::Opt().mali_fix == 3 || game::Opt().mali_fix == 4) && GlowComposite(s, stages)) return;
+    if (!game::Opt().bloom && GlowComposite(s, stages)) return;
     PixelKey pk = MakePixelKey(s, stages.info);
     sh.pkey = Hash(&pk, sizeof(pk));
     EnsurePixelShader(pk, sh);
@@ -3323,18 +3307,37 @@ void VulkanBackend::UploadSkin() {
     touch::SetSkinTexture(uint64_t(reinterpret_cast<uintptr_t>(set)));
 }
 
+// textures kept by count and by bytes: without BC (PowerVR, Mali) DXT is decoded to BGRA, 4 to 8 times its size, and a
+// thousand of those ran a phone out of memory within minutes
 void VulkanBackend::ReleaseOldTextures() {
     constexpr uint64_t kSweepEvery = 60;
     constexpr size_t kTexturesKept = 1024;  // a phone has less memory than a PC: fewer kept
     constexpr uint64_t kIdleFrames = 600;
-    if (presents_ % kSweepEvery != 0 || textures_.size() <= kTexturesKept) return;
+    constexpr VkDeviceSize kTextureBytes = 384ull << 20;
+    if (presents_ % kSweepEvery != 0) return;
+    VkDeviceSize bytes = 0;
+    for (const auto& [key, t] : textures_) bytes += t.img.mem.size;
+    if (textures_.size() <= kTexturesKept && bytes <= kTextureBytes) return;
+    std::vector<std::pair<uint64_t, uint64_t>> lru;  // last frame drawn, key
     for (auto it = textures_.begin(); it != textures_.end();) {
         if (it->second.frame + kIdleFrames < presents_) {
+            bytes -= it->second.img.mem.size;
             Retire(it->second.img);
             it = textures_.erase(it);
         } else {
+            lru.push_back({it->second.frame, it->first});
             ++it;
         }
+    }
+    if (bytes <= kTextureBytes) return;
+    // still over: the least recently drawn go, but none drawn in the last second; those are made again when drawn
+    std::sort(lru.begin(), lru.end());
+    for (const auto& [frame, key] : lru) {
+        if (bytes <= kTextureBytes || frame + kSweepEvery >= presents_) break;
+        auto it = textures_.find(key);
+        bytes -= it->second.img.mem.size;
+        Retire(it->second.img);
+        textures_.erase(it);
     }
 }
 

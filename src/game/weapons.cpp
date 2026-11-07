@@ -15,7 +15,6 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <map>
 #include <mutex>
 #include <set>
@@ -55,34 +54,6 @@ constexpr uint32_t kFixGuns = 0xB5F20;        // eax a Guns.bin in memory: reloc
 constexpr uint32_t kWorldState = 0x5AE0;  // the level loader's step
 constexpr uint32_t kStatePlaying = 0x1C;
 constexpr uint32_t kWorldSilver = 0x5CB0;  // byte: the level loaded Guns_s.bin
-// mode manager (the mission's state machine): +0x21084 its step (0 running), +0x21070 the mode in use, which the
-// mission's is at +0x20F78
-constexpr uint32_t kModeManager = 0x2D45F0;
-constexpr uint32_t kModeStep = 0x21084;
-constexpr uint32_t kModeActive = 0x21070;
-constexpr uint32_t kModeMission = 0x20F78;
-constexpr uint32_t kCheckpointFlag = 0x2F3BF8;  // byte: a checkpoint is held
-constexpr uint32_t kContinueCheckpoint = 0x1240D0;  // no arguments: reloads the mission from the held checkpoint
-// the checkpoint the game's snapshot (sub_001C8D20) takes, and the file that keeps it
-constexpr uint32_t kCpSection = 0x2A7EDC;  // int: the section of the checkpoint
-constexpr uint32_t kCpTime = 0x2F3BF4;     // float: the mission time
-constexpr uint32_t kCpBuffer = 0x2F3BFC;   // pointer: the buffer the section's state is copied to
-constexpr uint32_t kCpBytes = 0x2F3C00;    // bytes 0..5, a word at 8 and one at 0xC of the game state's copy
-constexpr uint32_t kCpMark = 0x2EC464;
-constexpr uint32_t kCpStructSize = 0x50;   // the snapshot's struct: weapons, ammunition, medkits (+0x50 a buffer pointer)
-constexpr uint32_t kCpStructBuffer = 0x50;
-constexpr uint32_t kCpEntry = 12;          // the section buffer's entry size
-constexpr uint32_t kWorldSections = 0x930;  // pointer, +4 the entries' count
-constexpr uint32_t kWorldSectionCount = 0x934;
-constexpr uint32_t kWorldLevelIds = 0x5AEC;  // two bytes: the mission and the level
-constexpr uint32_t kCpMagic = 0x32504342;    // "BCP2"
-constexpr uint32_t kModeDifficulty = 0x2014C;  // in the mode manager: the difficulty (the snapshot picks a value by it)
-// one file per level and difficulty
-std::string CpFile(uint32_t ids, uint32_t difficulty) {
-    char name[160];
-    std::snprintf(name, sizeof name, "/storage/emulated/0/Black/SaveData/checkpoint_%04X_d%u.sav", unsigned(ids), unsigned(difficulty));
-    return name;
-}
 // player
 constexpr uint32_t kPlayerKind = 0xC4;
 constexpr uint32_t kKindPlayer = 2;
@@ -100,8 +71,19 @@ constexpr uint32_t kPickupTable = 0x5844;      // its pickups, 0x160 bytes each:
 constexpr int kAmmoTypes = 10;
 constexpr uint32_t kPlayerMedkits = 0x8E1;  // byte in the player: the medkits held (found by the pickup tracker), the game holds 3
 constexpr int kMedkitMax = 3;
-constexpr uint32_t kPlayerGrenades = 0x286;  // uint16 in the player (src/game/cheats.cpp)
-constexpr int kGrenadeMax = 9;
+// grenades: the same field cheats.cpp uses for the infinite-grenades cheat (kCharGrenades = 0x286, uint16 on the
+// character). kGrenadeMax is 999, matching kAmmoMax below: fills the field to the same ceiling used for reserve
+// ammunition. The HUD only draws up to 4 grenade icons, so a count above 4 leaves the extra invisible but usable
+// (throws continue to spend from the full count, exactly like a pickup from an enemy that stacks past 4). If a
+// class ever has a hardcoded in-game cap, set kGrenadeMax back to 4 to match the HUD.
+constexpr uint32_t kCharGrenades = 0x286;  // uint16
+constexpr int kGrenadeMax = 999;
+// Ammo max for FILL AMMUNITION. kAmmoMax is the reserve ceiling set by DoFill for EVERY ammo type (all ten
+// inventory slots), so every weapon in the game — pistols, SMGs, rifles, shotguns, snipers, LMGs, launchers —
+// shows 999 in its reserve whether it's in a slot, about to be picked up, or already held. The magazine clip
+// (the count shown in the current gun) is NOT touched: the game's own reload pulls from the full reserve when
+// the player fires or reloads. That matches the historical FILL AMMUNITION behavior (reserve only) applied to
+// every ammo type, not just the two slot weapons.
 constexpr uint32_t kAmmoMax = 999;
 // weapon and its data
 constexpr uint32_t kWeaponType = 0;  // byte: index in the table
@@ -112,6 +94,18 @@ constexpr uint32_t kWeaponMagazine = 0xF4;  // the main fire's magazine, +0xF8 t
 constexpr uint32_t kMagazineData = 8;
 constexpr uint32_t kDataClip = 0x60;
 constexpr uint32_t kDataAmmoType = 0x64;
+// ---- no bullet spread: force every shot onto exactly the aim line ---------------------------------------------
+// The 8 hip-fire spread floats that sit right before the clip at +0x60. Positions 2..7 are the well-known
+// (standing / crouched / prone) hip spread, each a min and a max. Positions 0..1 are the two floats just before
+// them, commonly "moving spread" or dual-wield spread: they are what still widens a cone while the player walks
+// with a zeroed base spread, so they are included to make "one point" accuracy hold while moving too.
+//
+// RISK: if a weapon stops firing or does no damage after enabling NO BULLET SPREAD, the 0x40/0x44 pair was not
+// spread data after all. In that case, set kDataSpreadFirst back to 0x48 and kDataSpreadCount back to 6 — the
+// safe six-float zeroing is still a big improvement and perfect accuracy is then restored by also enabling
+// NO RECOIL (which prevents the view kicking off the aim line between shots).
+constexpr uint32_t kDataSpreadFirst = 0x40;
+constexpr int      kDataSpreadCount = 8;
 
 // the game's files under D:, the disc image when it runs from one, else the game's folder
 const std::string kDiscRoot = "D:\\";
@@ -165,11 +159,19 @@ std::set<std::string> g_supp_codes;
 std::map<uint32_t, int> g_applied;  // weapon object -> type it was handled as
 uint32_t g_swap_back = 0;           // a weapon to bring back out once the other one is in hand
 
+// no-bullet-spread: the originals of the spread floats, so turning the option back off restores the weapon
+uint32_t g_spread_weapon = 0;
+float    g_spread_orig[kDataSpreadCount] = {};
+
+// supply fill requests (one-shot actions): set by the panel, consumed by WeaponsTick on the game thread
+std::atomic<bool> g_fill{false};
+std::atomic<bool> g_medkits{false};
+std::atomic<bool> g_grenades{false};
+
 std::string CodeOf(const std::string& key_name) {
     return key_name.size() > 4 && key_name.compare(0, 4, "BG1_") == 0 ? key_name.substr(4) : key_name;
 }
 
-// black.log takes none of the LOGI lines, so the weapons' own diagnostics also go to a file beside it
 void DiagLog(const char* fmt, ...) {
     char line[512];
     va_list ap;
@@ -177,22 +179,6 @@ void DiagLog(const char* fmt, ...) {
     std::vsnprintf(line, sizeof(line), fmt, ap);
     va_end(ap);
     LOGI("%s", line);
-    static std::mutex lock;
-    std::lock_guard<std::mutex> guard(lock);
-    static const char* path = "/storage/emulated/0/Black/SaveData/weapons_diag.log";
-    static bool first = true;
-    static int lines = 0;
-    if (first) {  // every run starts a fresh file; the run before is kept as weapons_diag_prev.log
-        first = false;
-        std::rename(path, "/storage/emulated/0/Black/SaveData/weapons_diag_prev.log");
-    }
-    if (lines >= 400) return;  // a runaway line cannot fill the storage
-    lines++;
-    if (FILE* f = std::fopen(path, "a")) {
-        std::fputs(line, f);
-        std::fputc('\n', f);
-        std::fclose(f);
-    }
 }
 
 void LoadSuppressorCodes() {
@@ -200,6 +186,9 @@ void LoadSuppressorCodes() {
     if (done) return;
     done = true;
     g_supp_codes = {"GK1", "AK1", "PST", "MP1", "SMG", "ASR", "SM3", "P90", "M16", "BNS"};  // checked in game; SNR (Walther 2000) has no suppressor to put on or take off
+    std::string all;
+    for (const std::string& c : g_supp_codes) all += c + " ";
+    DiagLog("weapons: auto suppressor for %s", all.c_str());
 }
 
 bool SuppSupportedCode(const std::string& code) {
@@ -230,14 +219,11 @@ bool SuppSupportedType(uint32_t manager, int type) {
 std::mutex g_lock;
 weapons::View g_view;
 std::atomic<int> g_give{-1};
-std::atomic<bool> g_fill{false};
-std::atomic<bool> g_medkits{false};
-std::atomic<bool> g_grenades{false};
-std::atomic<bool> g_continue{false};
 
 void SetStatus(const std::string& text) {
     std::lock_guard<std::mutex> lock(g_lock);
     g_view.status = text;
+    DiagLog("weapons: %s", text.c_str());
 }
 
 std::string Lower(std::string s) {
@@ -479,6 +465,12 @@ void Refresh() {
     weapons::View v;
     v.in_level = ReadLevel(l);
     if (v.in_level) {
+        static uint32_t dumped_manager;  // once a level: every type of the table, to see which ones are suppressed
+        if (l.manager != dumped_manager) {
+            dumped_manager = l.manager;
+            for (int t = 0; t < l.count; t++)
+                DiagLog("weapons: table %d = %s", t, Decode(EntryKey(l, t)).c_str());
+        }
         int slots = std::min<int>(G<uint8_t>(l.inventory + kInvSlotCount), 2);
         for (int t = 0; t < l.count; t++) {
             std::string name = Decode(EntryKey(l, t));
@@ -542,6 +534,7 @@ void GrantSuppressor(int type) {
     uint8_t& owned = G<uint8_t>(kSuppOwned + uint32_t(type));
     if (owned == 1) return;
     owned = 1;
+    DiagLog("weapons: suppressor owned for type %d", type);
 }
 
 void DoFillMedkits() {
@@ -553,13 +546,44 @@ void DoFillMedkits() {
     SetStatus("Medkits filled (" + std::to_string(kMedkitMax) + "/" + std::to_string(kMedkitMax) + ")");
 }
 
+// Fill grenades to kGrenadeMax. Same pattern as DoFillMedkits: only touched when the count is below the max, so
+// a higher count (from pickups) is never reduced. The grenade field is the character's uint16 at +0x286 — the
+// same one the infinite-grenades cheat reads in cheats.cpp — so the fill and the cheat stay in sync.
 void DoFillGrenades() {
     Level l;
     if (!ReadLevel(l)) return SetStatus("Only during a level");
-    uint16_t& n = G<uint16_t>(l.player + kPlayerGrenades);
+    uint16_t& n = G<uint16_t>(l.player + kCharGrenades);
     if (n >= kGrenadeMax) return SetStatus("Grenades already full (" + std::to_string(kGrenadeMax) + ")");
     n = uint16_t(kGrenadeMax);
     SetStatus("Grenades filled (" + std::to_string(kGrenadeMax) + "/" + std::to_string(kGrenadeMax) + ")");
+}
+
+// FILL AMMUNITION — all weapons, reserve max 999. The inventory holds the reserve count for each ammo type
+// as a uint16 at l.inventory + 0, +2, ..., +(kAmmoTypes-1)*2. Setting every one of them to kAmmoMax covers the
+// whole weapon roster of the game at once: pistols, SMGs, rifles, shotguns, snipers, LMGs, launchers all read
+// from their type's inventory reserve, so filling all types means every weapon — in a slot, about to be
+// picked up, or already carried — will see 999 reserve ammo. The magazine clip (the count shown in the
+// current gun) is untouched; the game's own reload pulls from the (now full) reserve when the player fires or
+// reloads, which is the same behavior as before for the two slot weapons, now extended to every type.
+//
+// Behaviour mirrors DoFillGrenades: an "already full" check comes first so a second press reports it instead
+// of silently doing nothing, and the success / already-full status lines follow the same "X filled (N/N)" and
+// "X already full (N)" format, so the two features read the same in the panel's status bar.
+void DoFill() {
+    Level l;
+    if (!ReadLevel(l)) return SetStatus("Only during a level");
+    bool full = true;
+    for (int i = 0; i < kAmmoTypes; i++) {
+        if (G<uint16_t>(l.inventory + uint32_t(i) * 2) < kAmmoMax) { full = false; break; }
+    }
+    if (full) return SetStatus("Ammunition already full (" + std::to_string(kAmmoMax) + ")");
+    for (int i = 0; i < kAmmoTypes; i++) {
+        uint16_t& ammo = G<uint16_t>(l.inventory + uint32_t(i) * 2);
+        ammo = uint16_t(kAmmoMax);
+    }
+    for (int i = 0; i < 2; i++)
+        if (uint32_t w = Slot(l, i)) FillWeapon(l, w, true);
+    SetStatus("Ammunition filled (" + std::to_string(kAmmoMax) + "/" + std::to_string(kAmmoMax) + ")");
 }
 
 void DoGive(X86Context& ctx, int code) {
@@ -617,149 +641,6 @@ void DoGive(X86Context& ctx, int code) {
     Refresh();
 }
 
-// ---- the checkpoint file: the state the game's snapshot keeps, so a later run can continue from it --------------
-
-void Put32(std::vector<uint8_t>& v, uint32_t x) {
-    for (int i = 0; i < 4; i++) v.push_back(uint8_t(x >> (8 * i)));
-}
-
-void PutBytes(std::vector<uint8_t>& v, uint32_t guest, uint32_t n) {
-    const uint8_t* p = static_cast<const uint8_t*>(HostPtr(guest));
-    v.insert(v.end(), p, p + n);
-}
-
-struct Reader {
-    const std::vector<uint8_t>& d;
-    size_t at = 0;
-    bool ok = true;
-    uint32_t U32() {
-        if (at + 4 > d.size()) return ok = false, 0;
-        uint32_t x = 0;
-        for (int i = 0; i < 4; i++) x |= uint32_t(d[at + i]) << (8 * i);
-        at += 4;
-        return x;
-    }
-    const uint8_t* Bytes(size_t n) {
-        if (at + n > d.size()) return ok = false, nullptr;
-        const uint8_t* p = &d[at];
-        at += n;
-        return p;
-    }
-};
-
-uint32_t manager_mode() { return R32(kModeManager); }
-
-uint32_t LevelIds(uint32_t world) { return uint32_t(G<uint8_t>(world + kWorldLevelIds)) | uint32_t(G<uint8_t>(world + kWorldLevelIds + 1)) << 8; }
-
-// after the game's snapshot: s the struct it filled (ebx)
-void SaveCheckpointFile(uint32_t s) {
-    uint32_t world = R32(kWorld);
-    uint32_t manager = R32(kWeaponManager), table = manager ? R32(manager) : 0;
-    uint32_t count = world ? R32(world + kWorldSectionCount) : 0;
-    uint32_t difficulty = manager_mode() ? R32(manager_mode() + kModeDifficulty) : 0;
-    uint32_t buf1 = R32(kCpBuffer), buf2 = s ? R32(s + kCpStructBuffer) : 0;
-    uint32_t size2 = table ? G<uint8_t>(table + kTableCount) : 0;
-    if (!world || !s || s < world || s - world >= 0x10000 || !buf1 || !buf2 || !size2 || count > 4096) {
-        DiagLog("weapons: checkpoint not kept (world=%08X struct=%08X buf=%08X/%08X count=%u)", unsigned(world), unsigned(s),
-                unsigned(buf1), unsigned(buf2), unsigned(count));
-        return;
-    }
-    std::vector<uint8_t> d;
-    Put32(d, kCpMagic);
-    Put32(d, LevelIds(world));
-    Put32(d, difficulty);
-    Put32(d, R32(kCpSection));
-    Put32(d, R32(kCpTime));
-    Put32(d, s - world);
-    Put32(d, count);
-    Put32(d, size2);
-    PutBytes(d, kCpBytes, 6);
-    PutBytes(d, kCpBytes + 8, 2);
-    PutBytes(d, kCpBytes + 0xC, 2);
-    PutBytes(d, s, kCpStructSize);
-    PutBytes(d, buf1, count * kCpEntry);
-    PutBytes(d, buf2, size2);
-    std::string file = CpFile(LevelIds(world), difficulty);
-    std::string tmp = file + ".tmp";
-    {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        f.write(reinterpret_cast<const char*>(d.data()), std::streamsize(d.size()));
-        if (!f) return DiagLog("weapons: checkpoint file not written");
-    }
-    std::rename(tmp.c_str(), file.c_str());
-}
-
-// the kept checkpoint back into the game's memory, when this level is the one it was taken in; "" when done
-std::string LoadCheckpointFile() {
-    uint32_t world = R32(kWorld);
-    uint32_t manager = R32(kWeaponManager), table = manager ? R32(manager) : 0;
-    if (!world || !table) return "Only during a level";
-    uint32_t mode = manager_mode(), difficulty = mode ? R32(mode + kModeDifficulty) : 0;
-    std::ifstream f(CpFile(LevelIds(world), difficulty), std::ios::binary);
-    if (!f) return "No checkpoint yet";
-    std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    Reader r{d};
-    if (r.U32() != kCpMagic) return "Checkpoint file is invalid";
-    uint32_t ids = r.U32(), saved_difficulty = r.U32(), section = r.U32(), time = r.U32(), s_offset = r.U32(), count = r.U32(), size2 = r.U32();
-    const uint8_t* bytes_a = r.Bytes(6);
-    const uint8_t* bytes_b = r.Bytes(2);
-    const uint8_t* bytes_c = r.Bytes(2);
-    const uint8_t* s_data = r.Bytes(kCpStructSize);
-    const uint8_t* buf1_data = r.ok && count <= 4096 ? r.Bytes(count * kCpEntry) : nullptr;
-    const uint8_t* buf2_data = r.ok && size2 <= 256 ? r.Bytes(size2) : nullptr;
-    if (!r.ok || !buf1_data || !buf2_data || s_offset >= 0x10000) return "Checkpoint file is invalid";
-    if (LevelIds(world) != ids || R32(world + kWorldSectionCount) != count || G<uint8_t>(table + kTableCount) != size2)
-        return "Checkpoint is from another level";
-    if (difficulty != saved_difficulty) {
-        DiagLog("weapons: checkpoint difficulty %u, this run %u", unsigned(saved_difficulty), unsigned(difficulty));
-        return "Checkpoint is from another difficulty";
-    }
-    uint32_t s = world + s_offset, buf1 = R32(kCpBuffer), buf2 = R32(s + kCpStructBuffer);
-    if (!buf1 || !buf2) {
-        DiagLog("weapons: checkpoint buffers not ready (%08X, %08X)", unsigned(buf1), unsigned(buf2));
-        return "Not ready";
-    }
-    std::memcpy(HostPtr(s), s_data, kCpStructSize);
-    std::memcpy(HostPtr(buf1), buf1_data, count * kCpEntry);
-    std::memcpy(HostPtr(buf2), buf2_data, size2);
-    std::memcpy(HostPtr(kCpBytes), bytes_a, 6);
-    std::memcpy(HostPtr(kCpBytes + 8), bytes_b, 2);
-    std::memcpy(HostPtr(kCpBytes + 0xC), bytes_c, 2);
-    W32(kCpSection, section);
-    W32(kCpTime, time);
-    W32(kCpMark, 1);
-    G<uint8_t>(kCheckpointFlag) = 1;
-    return "";
-}
-
-// the game's own retry from the last checkpoint; only with a checkpoint held and the mission running
-void DoContinue(X86Context& ctx) {
-    Level l;
-    if (!ReadLevel(l)) return SetStatus("Only during a level");
-    if (!G<uint8_t>(kCheckpointFlag)) {  // none in memory: the one a run before kept in the file
-        std::string error = LoadCheckpointFile();
-        if (!error.empty()) return SetStatus(error);
-    }
-    uint32_t mgr = R32(kModeManager);
-    if (!mgr || R32(mgr + kModeStep) != 0 || R32(mgr + kModeActive) != mgr + kModeMission) {
-        DiagLog("weapons: continue refused, manager=%08X step=%u active=%08X", unsigned(mgr),
-                unsigned(mgr ? R32(mgr + kModeStep) : 0), unsigned(mgr ? R32(mgr + kModeActive) : 0));
-        return SetStatus("Not ready");
-    }
-    X86Context saved = ctx;
-    CallGuest(ctx, kContinueCheckpoint, {});
-    ctx = saved;
-    SetStatus("Loading checkpoint");
-}
-
-void DoFill() {
-    Level l;
-    if (!ReadLevel(l)) return SetStatus("Only during a level");
-    for (int i = 0; i < 2; i++)
-        if (uint32_t w = Slot(l, i)) FillWeapon(l, w, true);
-        SetStatus("Ammunition full");
-}
-
 // the weapon in hand, once it is idle: its suppressor goes on, if its type is on the list and it is not on already
 void AutoSuppressor(const Level& l) {
     if (!g_auto_suppressor) return;
@@ -776,6 +657,7 @@ void AutoSuppressor(const Level& l) {
     if (!g_supp_codes.count(code) || R32(w + kWeaponSuppressed)) return;
     W32(w + kWeaponSuppressed, 1);
     GrantSuppressor(type);
+    DiagLog("weapons: suppressor on for %s (weapon %08X)", code.c_str(), unsigned(w));
 }
 
 // the weapon whose suppressor was changed in hand went out; once the other one is in hand it is brought back
@@ -786,6 +668,66 @@ void SwapBack(const Level& l) {
     if (held != g_swap_back && (Slot(l, 0) == g_swap_back || Slot(l, 1) == g_swap_back))
         W32(l.inventory + kInvRequest, 2);
     g_swap_back = 0;
+}
+
+// logs the level loader's step whenever it changes: shows that the tick runs and why a level is not read
+void Heartbeat() {
+    static uint32_t last_state = 0xFFFFFFFF;
+    static int last_ok = -1;
+    uint32_t world = R32(kWorld);
+    uint32_t state = world ? R32(world + kWorldState) : 0xFFFFFFFE;
+    Level l;
+    int ok = ReadLevel(l) ? 1 : 0;
+    if (state == last_state && ok == last_ok) return;
+    last_state = state;
+    last_ok = ok;
+    DiagLog("weapons: tick world=%08X state=%X level=%d", unsigned(world), unsigned(state), ok);
+    if (world && !ok && state == kStatePlaying) {
+        uint32_t player = world + kWorldPlayer, inv = player + kPlayerInventory;
+        DiagLog("weapons: kind=%u owner=%08X (player %08X) slots=%08X manager=%08X", unsigned(R32(player + kPlayerKind)),
+             unsigned(R32(inv + kInvOwner)), unsigned(player), unsigned(R32(inv + kInvSlots)),
+             unsigned(R32(kWeaponManager)));
+    }
+}
+
+// ---- no bullet spread ------------------------------------------------------------------------------------------
+// Zero the spread floats of the weapon def so every player shot leaves the muzzle on exactly the aim line.
+// The originals are kept so the option can be turned off cleanly; when the player switches weapons the previous
+// weapon's values are restored and the new weapon's originals saved. The first time a weapon is handled its eight
+// values are logged (one-shot per weapon switch) so a mismatch can be spotted in the log.
+void ApplyNoBulletSpread(uint32_t weapon) {
+    if (!weapon) return;
+    uint32_t data = R32(weapon + kWeaponData);
+    if (!data) return;
+    if (weapon != g_spread_weapon) {
+        // restore the previous weapon's originals
+        if (g_spread_weapon) {
+            uint32_t old = R32(g_spread_weapon + kWeaponData);
+            if (old)
+                for (int i = 0; i < kDataSpreadCount; i++)
+                    G<float>(old + kDataSpreadFirst + i * 4) = g_spread_orig[i];
+        }
+        // remember this weapon's originals and log them for diagnostics
+        g_spread_weapon = weapon;
+        char buf[256];
+        int pos = 0;
+        for (int i = 0; i < kDataSpreadCount && pos < int(sizeof(buf)) - 8; i++) {
+            g_spread_orig[i] = G<float>(data + kDataSpreadFirst + i * 4);
+            pos += std::snprintf(buf + pos, sizeof(buf) - pos, "%s%.3f", i ? " " : "", g_spread_orig[i]);
+        }
+        DiagLog("weapons: no-spread saving [%s]", buf);
+    }
+    for (int i = 0; i < kDataSpreadCount; i++)
+        G<float>(data + kDataSpreadFirst + i * 4) = 0.0f;
+}
+
+void RestoreSpread() {
+    if (!g_spread_weapon) return;
+    uint32_t data = R32(g_spread_weapon + kWeaponData);
+    if (data)
+        for (int i = 0; i < kDataSpreadCount; i++)
+            G<float>(data + kDataSpreadFirst + i * 4) = g_spread_orig[i];
+    g_spread_weapon = 0;
 }
 
 }  // namespace
@@ -802,7 +744,6 @@ void Give(int type) { g_give = type; }
 void FillAmmo() { g_fill = true; }
 void FillMedkits() { g_medkits = true; }
 void FillGrenades() { g_grenades = true; }
-void ContinueCheckpoint() { g_continue = true; }
 
 void SetAutoSuppressor(bool on) { g_auto_suppressor = on; }  // add its declaration to game/weapons.h
 
@@ -815,12 +756,21 @@ void WeaponsTick(X86Context& ctx) {
     if (g_fill.exchange(false)) DoFill();
     if (g_medkits.exchange(false)) DoFillMedkits();
     if (g_grenades.exchange(false)) DoFillGrenades();
-    if (g_continue.exchange(false)) DoContinue(ctx);
     if (++tick % 10 == 0) Refresh();
+    Heartbeat();
     Level l;
     if (ReadLevel(l)) {
         AutoSuppressor(l);
         SwapBack(l);
+        // no bullet spread: zero the spread floats of the weapon in hand (or put back the originals when the
+        // option is turned off). Combined with NO RECOIL this keeps every shot on exactly the aim line.
+        if (game::Opt().no_bullet_spread) {
+            uint32_t held = R32(l.inventory + kInvHeld);
+            if (held) ApplyNoBulletSpread(held);
+            else RestoreSpread();
+        } else {
+            RestoreSpread();
+        }
         // the cheat: a medkit used brings the count back to full on the next tick
         if (game::Opt().infinite_medkits) {
             uint8_t& medkits = G<uint8_t>(l.player + kPlayerMedkits);
@@ -829,6 +779,7 @@ void WeaponsTick(X86Context& ctx) {
     } else {
         g_applied.clear();
         g_swap_back = 0;
+        RestoreSpread();  // level ended: hand the weapon-def back as the game left it
     }
 }
 
@@ -900,12 +851,3 @@ X86_FUNC(sub_001CEE10) {
 // the game's pickup message: kept as a plain pass-through (the recompiler's hook list may still name it)
 X86_EXTERN_FUNC(__imp__sub_0012B510);
 X86_FUNC(sub_0012B510) { __imp__sub_0012B510(ctx, base); }
-
-// The game's checkpoint snapshot (eax the section, ebx the struct it fills): once it is taken its state is also kept in
-// a file, for a later run to continue from.
-X86_EXTERN_FUNC(__imp__sub_001C8D20);
-X86_FUNC(sub_001C8D20) {
-    uint32_t s = ctx.ebx;
-    __imp__sub_001C8D20(ctx, base);
-    SaveCheckpointFile(s);
-}
