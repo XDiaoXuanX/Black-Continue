@@ -496,7 +496,7 @@ bool* ToggleFlag(Settings& s, int id) {
         case kEspHealth: return &o.esp_health;
         case kDynamicRes: return &o.dynamic_resolution;
         case kCrosshair: return &o.crosshair;
-        case kRapidFireExtra: return &o.rapid_fire_extra;
+        // NOTE: kRapidFireExtra was removed from here — it is now a stepped value (StepCheatRow)
         default: return nullptr;
     }
 }
@@ -611,11 +611,18 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
     game::Options& o = game::Opt();
     switch (id) {
         case kRapidFire:
-            // off, then 2 to 4 times the rate, then INFINITE (no wait at all)
-            if (step) o.rapid_fire = uint32_t(StepRange(int(o.rapid_fire), 1, 5, 1, step));
+            // off, then 2 to 998 times the rate, then INFINITE (no wait at all)
+            if (step) o.rapid_fire = uint32_t(StepRange(int(o.rapid_fire), 1, 999, 1, step));
             if (o.rapid_fire <= 1) std::snprintf(text, sizeof(text), "OFF");
-            else if (o.rapid_fire >= 5) std::snprintf(text, sizeof(text), "INFINITE");
+            else if (o.rapid_fire >= 999) std::snprintf(text, sizeof(text), "INFINITE");
             else std::snprintf(text, sizeof(text), "%uX", o.rapid_fire);
+            return true;
+        case kRapidFireExtra:
+            // off, then 2 to 998 times the rate, then INFINITE (no wait at all); for RPG, GRL and SNR (Walther 2000)
+            if (step) o.rapid_fire_extra = uint32_t(StepRange(int(o.rapid_fire_extra), 1, 999, 1, step));
+            if (o.rapid_fire_extra <= 1) std::snprintf(text, sizeof(text), "OFF");
+            else if (o.rapid_fire_extra >= 999) std::snprintf(text, sizeof(text), "INFINITE");
+            else std::snprintf(text, sizeof(text), "%uX", o.rapid_fire_extra);
             return true;
         case kAimView: {
             static constexpr uint32_t kValues[] = {0, 1};
