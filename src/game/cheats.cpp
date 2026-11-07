@@ -127,12 +127,12 @@ X86_FUNC(sub_001E8830) {
     uint32_t me = who ? R32(who) : 0;
     bool is_player = me && me == Player();
     uint16_t before = is_player ? G<uint16_t>(me + kCharGrenades) : 0;
-    // keep the count when either cheat wants it: INFINITE GRENADES, or RAPID FIRE EXTRA (which means "throw forever")
-    bool keep = is_player && (game::Opt().infinite_grenades || game::Opt().rapid_fire_extra);
+    // keep the count when either cheat wants it: INFINITE GRENADES, or RAPID FIRE EXTRA (any level but OFF throws forever)
+    bool keep = is_player && (game::Opt().infinite_grenades || game::Opt().rapid_fire_extra > 1);
     __imp__sub_001E8830(ctx, base);
     uint16_t after = is_player ? G<uint16_t>(me + kCharGrenades) : 0;
     bool thrown = is_player && after < before;
     if (keep && thrown) G<uint16_t>(me + kCharGrenades) = before;
     // RAPID FIRE EXTRA: fast-forward the throw animation so the next grenade can be thrown without waiting
-    if (thrown && game::Opt().rapid_fire_extra) game::g_grenade_skip_request = true;
+    if (thrown && game::Opt().rapid_fire_extra > 1) game::g_grenade_skip_request = true;
 }
