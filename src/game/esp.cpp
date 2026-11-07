@@ -2,7 +2,10 @@
 // bottom of the screen, drawn over the finished frame with the view the scene was drawn with. An enemy out of the
 // view is an arrow at the screen's edge towards it, in a colour of its own. AUTO HEADSHOT: while the player aims in the
 // view turns to the head of the living enemy nearest the crosshair. AIM ASSIST: a small pull of the view to the body
-// of an enemy near the crosshair while the player fires or aims in
+// of an enemy near the crosshair while the player fires or aims in.
+//
+// CROSSHAIR (menu CHEATS > CROSSHAIR): a marker at the middle of the view, drawn in the same 2D pass. Modes: dot (•),
+// cross (+), star (*). Colour and size set from the menu.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -52,6 +55,10 @@ constexpr float kAssistPull[] = {0.0f, 0.03f, 0.06f, 0.10f};  // of the turn to 
 constexpr float kDegrees = 180.0f / 3.14159265f;
 constexpr auto kFireHold = std::chrono::milliseconds(300);  // a fire request counts this long after it was seen
 
+// the crosshair: the arm's length and the line thickness, in lines of a 480 frame
+constexpr float kCrossBaseSize = 6.0f;
+constexpr float kCrossThickness = 1.5f;
+
 // an enemy is drawn while its update ran this recently: none once the game pauses, no flicker between ticks
 constexpr auto kSeen = std::chrono::milliseconds(250);
 constexpr size_t kMaxEnemies = 64;
@@ -76,7 +83,8 @@ struct Vertex {
     float x, y;
 };
 constexpr size_t kSegments = 8;  // the line, the box's four sides, the bar's back and front; an arrow takes three
-constexpr size_t kMaxVertices = kMaxEnemies * kSegments * 6;
+// room for the ESP plus the crosshair (dot/cross/star) in the same pass
+constexpr size_t kMaxVertices = kMaxEnemies * kSegments * 6 + 128;
 
 float Height() { return float(std::clamp(game::Opt().esp_height, 100u, 250u)) / 100.0f; }
 
@@ -213,77 +221,133 @@ void Aimbot(X86Context& ctx) {
     G<float>(c + kControllerPitch) += turn.pitch * pull;
 }
 
-// D3DVIEWPORT8: x, y, width, height. Called between the 2D layer's begin and end
+// D3DVIEWPORT8: x, y, width, height. Called between the 2D layer's begin and end.
+// Draws the crosshair (if on) and/or the ESP lines (if on) as untextured triangles in the game's own 2D layer.
 void DrawEsp(X86Context& ctx, float unit) {
-    if (!Opt().esp || !g_camera || !R32(kWorld)) return;
+    bool draw_esp   = Opt().esp;
+    bool draw_cross = Opt().crosshair;
+    if ((!draw_esp && !draw_cross) || !g_camera || !R32(kWorld)) return;
+
     uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
     float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
     float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
-    static const uint32_t buffer = mem::AllocSystem(kMaxVertices * sizeof(Vertex), 16);
-    static const uint32_t offset = mem::AllocSystem(8, 16);
+    static const uint32_t buffer  = mem::AllocSystem(kMaxVertices * sizeof(Vertex), 16);
+    static const uint32_t offset  = mem::AllocSystem(8, 16);
     static const uint32_t colours = mem::AllocSystem(kMaxVertices * 16, 16);
     Vertex* first = static_cast<Vertex*>(HostPtr(buffer));
     float(*colour)[4] = static_cast<float(*)[4]>(HostPtr(colours));
     Vertex* v = first;
+
     // a segment with a colour for each of its points
     auto add = [&](float x0, float y0, float x1, float y1, float width, const float rgba[4]) {
         size_t before = size_t(v - first);
         v = Segment(v, x0, y0, x1, y1, width);
         for (size_t i = before; i < size_t(v - first); i++) std::memcpy(colour[i], rgba, 16);
     };
-    float on[4], off[4];
-    Unpack(Opt().esp_on_color, on);
-    Unpack(Opt().esp_off_color, off);
-    const float back[4] = {0.1f, 0.1f, 0.1f, 1.0f};
-    float width = kThickness * unit, bar = kBarThickness * unit;
-    float height = Height();
-    auto now = std::chrono::steady_clock::now();
-    size_t kept = 0;
-    for (size_t i = 0; i < g_count; i++) {
-        uint32_t who = g_seen[i].who;
-        if (now - g_seen[i].at > kSeen || !Target(who)) continue;
-        Seen entry = g_seen[kept++] = g_seen[i];
-        const float* at = &G<float>(who + kCharPosition);
-        float chest[3] = {at[0], at[1] + height * kChestShare, at[2]}, clip[4];
-        bool front = Clip(chest, clip);
-        bool inside = front && std::fabs(clip[0]) <= clip[3] && std::fabs(clip[1]) <= clip[3];
-        if (!inside) {
-            // out of the view: an arrow at the edge towards it, flipped when it is behind the camera
-            float dx = front ? clip[0] : -clip[0], dy = front ? -clip[1] : clip[1];
-            if (!std::isfinite(dx) || !std::isfinite(dy)) continue;
-            if (std::fabs(dx) + std::fabs(dy) < 1e-4f) dx = 0, dy = 1;
-            float cx = vx + vw * 0.5f, cy = vy + vh * 0.5f;
-            float rx = std::max(vw * 0.5f - kEdge, 1.0f), ry = std::max(vh * 0.5f - kEdge, 1.0f);
-            float scale = 1.0f / std::max(std::fabs(dx) / rx, std::fabs(dy) / ry);
-            float ex = cx + dx * scale, ey = cy + dy * scale;
-            float length = std::sqrt(dx * dx + dy * dy), ux = dx / length, uy = dy / length;
-            float head = kArrow * unit;
-            add(cx + dx * scale * 0.78f, cy + dy * scale * 0.78f, ex, ey, width, off);
-            float bx = ex - ux * head, by = ey - uy * head;
-            add(ex, ey, bx - uy * head * 0.5f, by + ux * head * 0.5f, width, off);
-            add(ex, ey, bx + uy * head * 0.5f, by - ux * head * 0.5f, width, off);
-            continue;
+    // a filled square (two triangles) with a colour for each point
+    auto add_square = [&](float cx, float cy, float s, const float rgba[4]) {
+        float h = s * 0.5f;
+        const float corner[4][2] = {{cx - h, cy - h}, {cx + h, cy - h}, {cx + h, cy + h}, {cx - h, cy + h}};
+        for (int i : {0, 1, 2, 2, 1, 3}) {
+            *v = {corner[i][0], corner[i][1]};
+            std::memcpy(colour[v - first], rgba, 16);
+            v++;
         }
-        float feet[3] = {at[0], at[1], at[2]};
-        float top[3] = {at[0], at[1] + height, at[2]};
-        float f[2], h[2];
-        if (!Project(feet, vx, vy, vw, vh, f) || !Project(top, vx, vy, vw, vh, h)) continue;
-        float half = (f[1] - h[1]) * kBoxWidth * 0.5f;
-        float left = f[0] - half, right = f[0] + half;
-        add(vx + vw * 0.5f, vy + vh, f[0], f[1], width, on);
-        add(left, h[1], right, h[1], width, on);
-        add(left, f[1], right, f[1], width, on);
-        add(left, h[1], left, f[1], width, on);
-        add(right, h[1], right, f[1], width, on);
-        if (Opt().esp_health) {
-            float frac = entry.peak > 0 ? std::clamp(G<float>(who + kCharHealth) / entry.peak, 0.0f, 1.0f) : 1.0f;
-            float y = h[1] - kBarGap * unit - bar * 0.5f;
-            const float fill[4] = {std::min(1.0f, 2 * (1 - frac)), std::min(1.0f, 2 * frac), 0.0f, 1.0f};
-            add(left, y, right, y, bar, back);
-            if (frac > 0) add(left, y, left + (right - left) * frac, y, bar, fill);
+    };
+
+    // ---- ESP (drawn first, so the crosshair sits on top) ----
+    if (draw_esp) {
+        float on[4], off[4];
+        Unpack(Opt().esp_on_color, on);
+        Unpack(Opt().esp_off_color, off);
+        const float back[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+        float width = kThickness * unit, bar = kBarThickness * unit;
+        float height = Height();
+        auto now = std::chrono::steady_clock::now();
+        size_t kept = 0;
+        for (size_t i = 0; i < g_count; i++) {
+            uint32_t who = g_seen[i].who;
+            if (now - g_seen[i].at > kSeen || !Target(who)) continue;
+            Seen entry = g_seen[kept++] = g_seen[i];
+            const float* at = &G<float>(who + kCharPosition);
+            float chest[3] = {at[0], at[1] + height * kChestShare, at[2]}, clip[4];
+            bool front = Clip(chest, clip);
+            bool inside = front && std::fabs(clip[0]) <= clip[3] && std::fabs(clip[1]) <= clip[3];
+            if (!inside) {
+                // out of the view: an arrow at the edge towards it, flipped when it is behind the camera
+                float dx = front ? clip[0] : -clip[0], dy = front ? -clip[1] : clip[1];
+                if (!std::isfinite(dx) || !std::isfinite(dy)) continue;
+                if (std::fabs(dx) + std::fabs(dy) < 1e-4f) dx = 0, dy = 1;
+                float cx = vx + vw * 0.5f, cy = vy + vh * 0.5f;
+                float rx = std::max(vw * 0.5f - kEdge, 1.0f), ry = std::max(vh * 0.5f - kEdge, 1.0f);
+                float scale = 1.0f / std::max(std::fabs(dx) / rx, std::fabs(dy) / ry);
+                float ex = cx + dx * scale, ey = cy + dy * scale;
+                float length = std::sqrt(dx * dx + dy * dy), ux = dx / length, uy = dy / length;
+                float head = kArrow * unit;
+                add(cx + dx * scale * 0.78f, cy + dy * scale * 0.78f, ex, ey, width, off);
+                float bx = ex - ux * head, by = ey - uy * head;
+                add(ex, ey, bx - uy * head * 0.5f, by + ux * head * 0.5f, width, off);
+                add(ex, ey, bx + uy * head * 0.5f, by - ux * head * 0.5f, width, off);
+                continue;
+            }
+            float feet[3] = {at[0], at[1], at[2]};
+            float top[3] = {at[0], at[1] + height, at[2]};
+            float f[2], h[2];
+            if (!Project(feet, vx, vy, vw, vh, f) || !Project(top, vx, vy, vw, vh, h)) continue;
+            float half = (f[1] - h[1]) * kBoxWidth * 0.5f;
+            float left = f[0] - half, right = f[0] + half;
+            add(vx + vw * 0.5f, vy + vh, f[0], f[1], width, on);
+            add(left, h[1], right, h[1], width, on);
+            add(left, f[1], right, f[1], width, on);
+            add(left, h[1], left, f[1], width, on);
+            add(right, h[1], right, f[1], width, on);
+            if (Opt().esp_health) {
+                float frac = entry.peak > 0 ? std::clamp(G<float>(who + kCharHealth) / entry.peak, 0.0f, 1.0f) : 1.0f;
+                float y = h[1] - kBarGap * unit - bar * 0.5f;
+                const float fill[4] = {std::min(1.0f, 2 * (1 - frac)), std::min(1.0f, 2 * frac), 0.0f, 1.0f};
+                add(left, y, right, y, bar, back);
+                if (frac > 0) add(left, y, left + (right - left) * frac, y, bar, fill);
+            }
+        }
+        g_count = kept;
+    }
+
+    // ---- CROSSHAIR (drawn on top) ----
+    if (draw_cross) {
+        float rgba[4];
+        Unpack(Opt().crosshair_color, rgba);
+        rgba[3] = 1.0f;  // opaque
+        float cx = vx + vw * 0.5f;
+        float cy = vy + vh * 0.5f;
+        float size = kCrossBaseSize * float(std::clamp(Opt().crosshair_size, 10u, 500u)) / 100.0f * unit;
+        float th   = kCrossThickness * unit;
+        uint32_t mode = Opt().crosshair_mode > 2 ? 0 : Opt().crosshair_mode;
+
+        if (mode == 0) {
+            // dot: a small filled square at the middle
+            add_square(cx, cy, size * 0.5f, rgba);
+        } else if (mode == 1) {
+            // cross: four arms with a gap in the middle
+            float gap = size * 0.25f;
+            add(cx - gap - size, cy, cx - gap, cy, th, rgba);
+            add(cx + gap, cy, cx + gap + size, cy, th, rgba);
+            add(cx, cy - gap - size, cx, cy - gap, th, rgba);
+            add(cx, cy + gap, cx, cy + gap + size, th, rgba);
+        } else {
+            // star: three axes (0/60/120 deg) with a gap, plus a small centre dot
+            float gap = size * 0.3f;
+            for (int i = 0; i < 3; i++) {
+                float ang = float(i) * 3.14159265f / 3.0f;
+                float c = std::cos(ang), s = std::sin(ang);
+                add(cx + gap * c, cy + gap * s,
+                    cx + (gap + size) * c, cy + (gap + size) * s, th, rgba);
+                add(cx - gap * c, cy - gap * s,
+                    cx - (gap + size) * c, cy - (gap + size) * s, th, rgba);
+            }
+            add_square(cx, cy, size * 0.2f, rgba);
         }
     }
-    g_count = kept;
+
     if (v == first) return;
     W32(offset, 0);
     W32(offset + 4, 0);
