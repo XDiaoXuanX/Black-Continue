@@ -496,7 +496,7 @@ bool* ToggleFlag(Settings& s, int id) {
         case kEspHealth: return &o.esp_health;
         case kDynamicRes: return &o.dynamic_resolution;
         case kCrosshair: return &o.crosshair;
-        // NOTE: kRapidFireExtra is a stepped value (StepCheatRow), not a toggle
+        // kRapidFireExtra is a stepped value (StepCheatRow), not a toggle
         default: return nullptr;
     }
 }
