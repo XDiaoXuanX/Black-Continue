@@ -376,7 +376,7 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kInfiniteAmmo, "INFINITE AMMO"},
     {Kind::Value, kInfiniteGrenades, "INFINITE GRENADES"},
     {Kind::Value, kRapidFire, "RAPID FIRE"},
-    {Kind::Value, kRapidFireExtra, "RAPID FIRE EXTRA (RPG, GRL, SNR, GRENADE)"},
+    {Kind::Value, kRapidFireExtra, "RAPID FIRE EXTRA (RPG, GRL, BNS, GRENADE)"},
     {Kind::Value, kNoRecoil, "NO RECOIL"},
     {Kind::Value, kSteadyAim, "STEADY AIM"},
     {Kind::Value, kAimView, "AIM VIEW"},
@@ -496,7 +496,7 @@ bool* ToggleFlag(Settings& s, int id) {
         case kEspHealth: return &o.esp_health;
         case kDynamicRes: return &o.dynamic_resolution;
         case kCrosshair: return &o.crosshair;
-        // NOTE: kRapidFireExtra was removed from here — it is now a stepped value (StepCheatRow)
+        // NOTE: kRapidFireExtra is a stepped value (StepCheatRow), not a toggle
         default: return nullptr;
     }
 }
@@ -618,7 +618,7 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
             else std::snprintf(text, sizeof(text), "%uX", o.rapid_fire);
             return true;
         case kRapidFireExtra:
-            // off, then 2 to 998 times the rate, then INFINITE (no wait at all); for RPG, GRL and SNR (Walther 2000)
+            // off, then 2 to 998 times the rate, then INFINITE (no wait at all); for RPG, GRL and BNS (M203)
             if (step) o.rapid_fire_extra = uint32_t(StepRange(int(o.rapid_fire_extra), 1, 999, 1, step));
             if (o.rapid_fire_extra <= 1) std::snprintf(text, sizeof(text), "OFF");
             else if (o.rapid_fire_extra >= 999) std::snprintf(text, sizeof(text), "INFINITE");
