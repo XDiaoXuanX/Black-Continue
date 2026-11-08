@@ -832,8 +832,7 @@ X86_FUNC(sub_001EEFD0) {
         uint32_t me_pre = R32(weapon + kWeaponOwner);
         uint32_t data_pre = R32(weapon + kWeaponData);
         const char* name_pre = data_pre ? TableName(data_pre) : nullptr;
-        uint32_t rfe_pre = std::clamp(game::Opt().rapid_fire_extra, 1u, 999u);
-        if (me_pre == Player() && rfe_pre > 1 && name_pre) {
+        if (me_pre == Player() && game::Opt().rapid_fire_extra && name_pre) {
             bool pure_launcher = !std::strcmp(name_pre, "RPG") || !std::strcmp(name_pre, "GRL");
             bool bns = !std::strcmp(name_pre, "BNS");
             if (pure_launcher && FireHeld()) {
@@ -858,9 +857,20 @@ X86_FUNC(sub_001EEFD0) {
     bool alt_shot = alt_after < alt_before;  // the launcher under the barrel fired (M203)
     RestoreAmmo(weapon, kept);
     uint32_t me = R32(weapon + kWeaponOwner);
-    // the rapid fire cheat: a shot's wait, its fire mode's +0x20, is that many times shorter
-    uint32_t faster = std::clamp(game::Opt().rapid_fire, 1u, 10u);
-    if (shot && me == Player() && wait > 0) wait /= float(faster);
+    // rapid fire cheat: 1 OFF, 2-998 multiplier, 999 INFINITE. RAPID FIRE EXTRA also forces instant for the pure
+    // launchers (RPG / GRL / SNR) whatever the rapid fire level, so it works regardless
+    uint32_t faster = std::clamp(game::Opt().rapid_fire, 1u, 999u);
+    bool instant = faster >= 999;
+    if (!instant && shot && me == Player() && game::Opt().rapid_fire_extra) {
+        uint32_t data = R32(weapon + kWeaponData);
+        const char* name = data ? TableName(data) : nullptr;
+        if (name && (!std::strcmp(name, "RPG") || !std::strcmp(name, "GRL") || !std::strcmp(name, "SNR")))
+            instant = true;
+    }
+    if (shot && me == Player() && wait > 0) {
+        if (instant) wait = 0.0001f;
+        else wait /= float(faster);
+    }
     if (me == Player()) {
         DumpWeapon(weapon);
         TraceShot(weapon, shot);
@@ -869,7 +879,7 @@ X86_FUNC(sub_001EEFD0) {
     }
     if (wait == rest) return;
     if (instant && shot && me == Player()) {
-        wait = 0.0001f;
+        wait = 0.0001f;  // skip WholeFrames' one-frame floor: no wait at all
     } else {
         wait = WholeFrames(wait, rest <= 0 && rest > -dt ? rest : -dt);
     }
@@ -978,7 +988,7 @@ X86_FUNC(sub_0017B130) {
     //  - launcher fire (sub_001EEFD0 sets g_launcher_skip_request when RPG / GRL / BNS M203 fires, or while held)
     // Both capture the current non-idle clip (never the idle clip S_001 by mistake) and hold its time (t14 at +0x14)
     // at its length (+0x1C) so the game sees the animation as done and switches back to idle, allowing the next action
-    if (game::Opt().rapid_fire_extra > 1) {
+    if (game::Opt().rapid_fire_extra) {
         // ---- grenade throw ----
         if (game::g_grenade_skip_request.exchange(false)) {
             std::string name = ReadCString(ac + kAnimName, 13);
@@ -1019,7 +1029,7 @@ X86_FUNC(sub_0017B130) {
         }
     }
     __imp__sub_0017B130(ctx, base);
-    if (game::Opt().rapid_fire_extra > 1) {
+    if (game::Opt().rapid_fire_extra) {
         if (game::g_grenade_skip_frames.load() > 0) {
             uint32_t now_clip = R32(ac + kAnimClip);
             if (now_clip != game::g_grenade_skip_clip.load()) game::g_grenade_skip_frames = 0;
