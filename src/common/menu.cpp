@@ -32,7 +32,6 @@ namespace game {
 void EspOverlay();  // esp.cpp
 }
 
-// native/gyro.cpp: aiming by turning the phone
 namespace gyro {
 uint32_t CurrentMode();
 const char* ModeName();
@@ -44,7 +43,6 @@ bool InvertY();
 void SetInvert(bool x, bool y);
 }  // namespace gyro
 
-// native/touch.cpp: the touch controls' layout
 namespace touch {
 const char* LayoutName();
 void StepLayout(int step);
@@ -63,18 +61,15 @@ const char* AimModeName();
 void StepAimMode(int step);
 }  // namespace touch
 
-// native/touch.cpp: what was used last
 namespace input {
 bool TouchActive();
 bool KeyboardActive();
 }  // namespace input
 
-// native/dynamic_resolution.cpp: the render resolution in use, percent of the screen's
 namespace dynres {
 uint32_t Percent();
 }  // namespace dynres
 
-// native/update.cpp: the activity asks GitHub for a newer release and says what it found
 namespace host {
 void CheckForUpdates();
 }  // namespace host
@@ -87,7 +82,6 @@ namespace {
 
 std::atomic<bool> g_open{false};
 
-// the cover art's brass on black
 constexpr ImVec4 kPanelBg{0.035f, 0.03f, 0.025f, 0.94f};
 constexpr ImVec4 kBorder{0.72f, 0.58f, 0.30f, 0.85f};
 constexpr ImVec4 kText{0.90f, 0.88f, 0.84f, 1.0f};
@@ -97,7 +91,6 @@ constexpr ImVec4 kDim{0.62f, 0.58f, 0.50f, 1.0f};
 constexpr ImVec4 kTab{0.12f, 0.10f, 0.07f, 1.0f};
 constexpr ImVec4 kTabHovered{0.20f, 0.16f, 0.09f, 1.0f};
 constexpr ImVec4 kButton{0.17f, 0.14f, 0.08f, 1.0f};
-// lighter than the highlight, so it shows on a selected row
 constexpr ImVec4 kButtonHovered{0.40f, 0.31f, 0.14f, 1.0f};
 constexpr ImVec4 kLine{0.86f, 0.69f, 0.34f, 0.35f};
 constexpr std::pair<ImGuiCol, ImVec4> kPanelColors[] = {
@@ -148,7 +141,6 @@ int NearestIndex(const uint32_t* values, int count, uint32_t value) {
     return best;
 }
 
-// index nearest value, stepped first
 template <size_t N>
 int StepTable(const uint32_t (&values)[N], uint32_t& value, int step) {
     int i = NearestIndex(values, int(N), value);
@@ -159,7 +151,6 @@ int StepTable(const uint32_t (&values)[N], uint32_t& value, int step) {
     return i;
 }
 
-// value clamped to lo to hi, stepped by inc through the values StepIndex wraps over
 int StepRange(int value, int lo, int hi, int inc, int step) {
     int count = (hi - lo) / inc + 1;
     return lo + inc * StepIndex((std::clamp(value, lo, hi) - lo) / inc, step, count);
@@ -175,9 +166,8 @@ void Section(const char* title) {
     ImGui::Dummy(ImVec2(0, em * 0.1f));
 }
 
-constexpr float kValueEms = 12.0f;  // the value column's width
+constexpr float kValueEms = 12.0f;
 
-// a row's place and size: the label left, the value block (an arrow each side of the value) right
 struct RowBox {
     float em;
     float row_w;
@@ -207,7 +197,6 @@ void RowLabel(const RowBox& box, const char* label) {
     ImGui::TextUnformatted(Ui(label).c_str());
 }
 
-// the cursor back to the row's start, then past the whole row
 void EndRow(const RowBox& box) {
     ImGui::SetCursorPos(ImVec2(box.row_x, box.row_y));
     ImGui::Dummy(ImVec2(box.row_w, box.row_h));
@@ -218,15 +207,13 @@ void FillItem() {
                                               ImGui::GetColorU32(ImGuiCol_Header));
 }
 
-std::atomic<int> g_pad_step{0};         // the pad's d-pad left (-1) or right (1), read from SDL by touch::PadPanel
-ImGuiID g_last_row_id = 0;              // the row that had the focus last
-std::atomic<int64_t> g_pad_step_ms{0};  // when, so one nobody took does not step a row later
+std::atomic<int> g_pad_step{0};
+ImGuiID g_last_row_id = 0;
+std::atomic<int64_t> g_pad_step_ms{0};
 int64_t SteadyMs() {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
-        .count();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// label left, arrows and value right, the row is the only nav stop
 int OptionRow(const char* label, const char* value, bool confirm = false) {
     const ImGuiStyle& style = ImGui::GetStyle();
     RowBox box = MeasureRow();
@@ -236,8 +223,6 @@ int OptionRow(const char* label, const char* value, bool confirm = false) {
     ImGuiContext& g = *ImGui::GetCurrentContext();
     const ImGuiID row_id = ImGui::GetItemID();
     bool focused = ImGui::IsItemFocused();
-    // the d-pad's left clears ImGui's focus before this code sees it (the row goes dark, the next press lands on the
-    // top row): the row that had the focus takes it back when a step is waiting for it
     if (!focused && g.NavId == 0 && g.NavWindow && row_id == g_last_row_id && g_pad_step.load() != 0 &&
         SteadyMs() - g_pad_step_ms.load() <= 250) {
         ImGui::SetFocusID(row_id, ImGui::GetCurrentWindow());
@@ -246,8 +231,6 @@ int OptionRow(const char* label, const char* value, bool confirm = false) {
     if (focused) {
         g_last_row_id = row_id;
         FillItem();
-        // the d-pad's left and right come from SDL (touch::PadPanel), the same way L1 and R1 do; ImGui's own keys for
-        // them are the fallback
         int dir = g_pad_step.exchange(0);
         if (dir && SteadyMs() - g_pad_step_ms.load() > 250) dir = 0;
         if (!dir) {
@@ -256,12 +239,11 @@ int OptionRow(const char* label, const char* value, bool confirm = false) {
             if (left || right) dir = left ? -1 : 1;
         }
         if (dir) step = dir;
-        // a row has nothing to its left or right: ImGui's own move there only loses the focus
         if (dir || g.NavMoveDir == ImGuiDir_Left || g.NavMoveDir == ImGuiDir_Right) ImGui::NavMoveRequestCancel();
-        if (confirm && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false)) step = 1;  // A, on a row with no arrows' worth
+        if (confirm && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false)) step = 1;
     }
     RowLabel(box, label);
-    ImGui::PushItemFlag(ImGuiItemFlags_NoNav | ImGuiItemFlags_ButtonRepeat, true);  // held arrows keep stepping
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav | ImGuiItemFlags_ButtonRepeat, true);
     float block_x = box.row_x + box.row_w - box.block_w;
     ImGui::SetCursorPos(ImVec2(block_x, box.row_y));
     if (ImGui::ArrowButton("##dec", ImGuiDir_Left)) step = -1;
@@ -279,16 +261,8 @@ int OptionRow(const char* label, const char* value, bool confirm = false) {
 }
 
 const char* OnOff(bool on) { return on ? "ON" : "OFF"; }
-
-void Flip(bool& on, int step) {
-    if (step) on = !on;
-}
-
-// applies and saves
-void Changed() {
-    audio::SetOutputMode(game::Opt().audio_output);
-    Save();
-}
+void Flip(bool& on, int step) { if (step) on = !on; }
+void Changed() { audio::SetOutputMode(game::Opt().audio_output); Save(); }
 
 enum RowId { kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlur, kSkipIntros, kSensitivity,
              kInvertMouse, kWalkSpeed, kFov, kViewmodelFov, kHoldAim, kDrawDistance, kAudioOutput, kLanguage,
@@ -299,12 +273,12 @@ enum RowId { kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlu
              kFog, kAntiAliasing, kHdr, kEsp, kAimbot, kTouchStick, kDynamicRes, kDynamicTarget, kDynamicMin,
              kDynamicMax, kDynamicHold, kAutoUpdate, kInfiniteMedkits, kTouchFireLook, kTouchAim, kSteadyAim, kAimView, kNoKick, kAdsCustom, kMaliFix,
              kEspHealth, kEspLabel, kHeadHeight, kEspHeight, kEspOnRed, kEspOnGreen, kEspOnBlue, kEspOffRed, kEspOffGreen,
-             kEspOffBlue, kAimAssist, kEspArrows, kEspLabelShow, kEspWidth, kHeadOffset };
+             kEspOffBlue, kAimAssist, kEspArrows, kEspLabelShow, kEspWidth, kHeadOffset,
+             kCrosshair, kCrosshairMode, kCrosshairSize, kCrosshairRed, kCrosshairGreen, kCrosshairBlue };
 
 using rows::Kind;
 using rows::Row;
 
-// the recomp's settings in pages of their own, grouped within; the game's options menu shows the headings too
 constexpr Row kGraphicsRows[] = {
     {Kind::Heading, -1, "DISPLAY"},
     {Kind::Value, kRenderResolution, "RENDER RESOLUTION"},
@@ -350,7 +324,6 @@ constexpr Row kTouchRows[] = {
     {Kind::Value, kGyroInvertY, "GYRO INVERT Y"},
 };
 
-// on the game's control setup page, under its own rows
 constexpr Row kControllerRows[] = {
     {Kind::Value, kLeftDeadzone, "LEFT STICK DEADZONE"},
     {Kind::Value, kRightDeadzone, "RIGHT STICK DEADZONE"},
@@ -358,7 +331,6 @@ constexpr Row kControllerRows[] = {
     {Kind::Value, kRightSensitivity, "RIGHT STICK SENSITIVITY"},
 };
 
-// LANGUAGE always shows: Indonesian is there whatever the disc
 constexpr Row kGeneralRows[] = {
     {Kind::Value, kLanguage, "LANGUAGE"},
     {Kind::Value, kSkipIntros, "SKIP INTROS"},
@@ -368,8 +340,6 @@ constexpr Row kGeneralRows[] = {
     {Kind::Value, kAutoUpdate, "STARTUP UPDATE CHECK"},
 };
 
-
-// a page of its own, apart from the recomp's settings
 constexpr Row kCheatRows[] = {
     {Kind::Heading, -1, "WEAPONS"},
     {Kind::Value, kInfiniteAmmo, "INFINITE AMMO"},
@@ -398,7 +368,7 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kEspOffRed, "ESP OUT OF VIEW RED"},
     {Kind::Value, kEspOffGreen, "ESP OUT OF VIEW GREEN"},
     {Kind::Value, kEspOffBlue, "ESP OUT OF VIEW BLUE"},
-    {Kind::Value, kAimbot, "AUTO HEADSHOT (WHILE AIMING IN)"},  // esp.cpp turns the view only at a zoom above 1
+    {Kind::Value, kAimbot, "AUTO HEADSHOT (WHILE AIMING IN)"},
     {Kind::Value, kHeadHeight, "HEADSHOT HEIGHT"},
     {Kind::Value, kHeadOffset, "HEADSHOT OFFSET"},
     {Kind::Value, kAimAssist, "AIM ASSIST"},
@@ -415,10 +385,8 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kUnlockBlackOps, "UNLOCK BLACK OPS"},
 };
 
-// the title menu's CREDITS page: who and what, and the links, which open in the browser. Its rows take no step; a
-// row's id is kCredit and its place in kCredits
 struct Credit {
-    const char* label;  // a heading when there is no value
+    const char* label;
     const char* value;
     const char* url;
 };
@@ -471,7 +439,6 @@ const std::vector<Row>& InputRows() {
     return list;
 }
 
-// the setting an ON / OFF row flips, nullptr for any other row
 bool* ToggleFlag(Settings& s, int id) {
     game::Options& o = game::Opt();
     switch (id) {
@@ -499,12 +466,11 @@ bool* ToggleFlag(Settings& s, int id) {
         case kEspHealth: return &o.esp_health;
         case kDynamicRes: return &o.dynamic_resolution;
         case kCrosshair: return &o.crosshair;
-        // kRapidFireExtra is a stepped value (StepCheatRow), not a toggle
+        case kRapidFireExtra: return &o.rapid_fire_extra;
         default: return nullptr;
     }
 }
 
-// both field of view rows: 45 to 140 in steps of 1, 70 the game's own
 constexpr int kFovMin = 45;
 constexpr int kFovMax = 140;
 constexpr uint32_t kGameFov = 70;
@@ -513,21 +479,17 @@ void FovText(uint32_t fov, char (&text)[64]) {
     std::snprintf(text, sizeof(text), fov == kGameFov ? "%u (DEFAULT)" : "%u", fov);
 }
 
-// the dynamic resolution's frame rates to hold
 constexpr uint32_t kDynamicTargets[] = {30, 45, 60, 90, 120};
 
-// a resolution as percent of the screen's and its pixels
 void PercentText(uint32_t percent, char (&text)[64]) {
     Mode out = Output();
     std::snprintf(text, sizeof(text), "%u%% (%ux%u)", percent, out.width * percent / 100, out.height * percent / 100);
 }
 
-// the display rows that are no ON / OFF, stepped first; false for another row
 bool StepDisplayRow(int id, int step, Settings& s, char (&text)[64]) {
     game::Options& o = game::Opt();
     switch (id) {
         case kRenderResolution: {
-            // 20% to 200% in steps of 5; greyed while the dynamic resolution has it, which it shows as it is now
             if (step) s.render_percent = uint32_t(StepRange(int(s.render_percent), 20, 200, 5, step));
             PercentText(o.dynamic_resolution ? dynres::Percent() : s.render_percent, text);
             return true;
@@ -536,7 +498,6 @@ bool StepDisplayRow(int id, int step, Settings& s, char (&text)[64]) {
             std::snprintf(text, sizeof(text), "%u FPS", kDynamicTargets[StepTable(kDynamicTargets, o.dynamic_target_fps, step)]);
             return true;
         case kDynamicMin:
-            // 20% up to the max, the max down to the min
             if (step) o.dynamic_min_percent = uint32_t(StepRange(int(o.dynamic_min_percent), 20, int(o.dynamic_max_percent), 5, step));
             PercentText(o.dynamic_min_percent, text);
             return true;
@@ -545,7 +506,6 @@ bool StepDisplayRow(int id, int step, Settings& s, char (&text)[64]) {
             PercentText(o.dynamic_max_percent, text);
             return true;
         case kDynamicHold:
-            // 1 to 30 seconds
             if (step) o.dynamic_hold = uint32_t(StepRange(int(o.dynamic_hold), 1, 30, 1, step));
             std::snprintf(text, sizeof(text), "%u S", o.dynamic_hold);
             return true;
@@ -553,12 +513,10 @@ bool StepDisplayRow(int id, int step, Settings& s, char (&text)[64]) {
             std::snprintf(text, sizeof(text), "%s", kFmvScaleNames[StepTable(kFmvScales, o.fmv_scale, step)]);
             return true;
         case kAntiAliasing:
-            std::snprintf(text, sizeof(text), "%s",
-                          kAntiAliasingNames[StepTable(kAntiAliasings, o.anti_aliasing, step)]);
+            std::snprintf(text, sizeof(text), "%s", kAntiAliasingNames[StepTable(kAntiAliasings, o.anti_aliasing, step)]);
             return true;
         case kScreenFilter:
-            std::snprintf(text, sizeof(text), "%s",
-                          kScreenFilterNames[StepTable(kScreenFilters, o.screen_filter, step)]);
+            std::snprintf(text, sizeof(text), "%s", kScreenFilterNames[StepTable(kScreenFilters, o.screen_filter, step)]);
             return true;
         case kFov:
             if (step) o.fov = uint32_t(StepRange(int(o.fov), kFovMin, kFovMax, 1, step));
@@ -580,7 +538,6 @@ bool StepDisplayRow(int id, int step, Settings& s, char (&text)[64]) {
     }
 }
 
-// the graphics rows that are no ON / OFF, stepped first; false for another row
 bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
     game::Options& o = game::Opt();
     switch (id) {
@@ -598,7 +555,6 @@ bool StepGraphicsRow(int id, int step, Settings& s, char (&text)[64]) {
     }
 }
 
-// a packed 0xRRGGBB colour's channel (0 red, 1 green, 2 blue), 0 to 255 in steps of 5
 void ColorChannel(uint32_t& packed, int channel, int step, char (&text)[64]) {
     int shift = 16 - 8 * channel;
     int value = int((packed >> shift) & 255);
@@ -609,15 +565,20 @@ void ColorChannel(uint32_t& packed, int channel, int step, char (&text)[64]) {
     std::snprintf(text, sizeof(text), "%d", value);
 }
 
-// the cheat rows that are no ON / OFF, stepped first; false for another row
 bool StepCheatRow(int id, int step, char (&text)[64]) {
     game::Options& o = game::Opt();
     switch (id) {
-        case kRapidFire:
-        {
-            // off, then 2, 3, 4, 6, 8 and 10 times the rate
-            static constexpr uint32_t kRates[] = {1, 2, 3, 4, 6, 8, 10};
-            StepTable(kRates, o.rapid_fire, step);
+        case kRapidFire: {
+            // 1 OFF, 2-998 = times the game's rate of fire, 999 INFINITE. The step grows with the value so the whole
+            // 1-999 range is reachable with the arrows: 1 below 10, 10 below 100, 100 above
+            if (step) {
+                int v = int(o.rapid_fire);
+                int inc = v < 10 ? 1 : v < 100 ? 10 : 100;
+                v += inc * step;
+                if (v < 1) v = (step < 0) ? 999 : 1;
+                if (v > 999) v = 999;
+                o.rapid_fire = uint32_t(v);
+            }
             if (o.rapid_fire <= 1) std::snprintf(text, sizeof(text), "OFF");
             else if (o.rapid_fire >= 999) std::snprintf(text, sizeof(text), "INFINITE");
             else std::snprintf(text, sizeof(text), "%uX", o.rapid_fire);
@@ -654,12 +615,10 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
             return true;
         }
         case kEspWidth:
-            // 0.0 (nothing) to 3.0 lines of the 480 frame in steps of a tenth
             if (step) o.esp_width = uint32_t(StepRange(int(o.esp_width), 0, 30, 1, step));
             std::snprintf(text, sizeof(text), o.esp_width == 8 ? "%.1f (DEFAULT)" : "%.1f", double(o.esp_width) / 10.0);
             return true;
         case kHeadOffset: {
-            // 30 centimetres left to 30 right of the aim point, in steps of one
             if (step) o.head_offset = uint32_t(StepRange(int(o.head_offset), 0, 60, 1, step));
             int cm = int(o.head_offset) - 30;
             if (!cm) std::snprintf(text, sizeof(text), "CENTER (DEFAULT)");
@@ -667,7 +626,6 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
             return true;
         }
         case kEspHeight:
-            // 1.00 to 2.50 metres in steps of 5 centimetres
             if (step) o.esp_height = uint32_t(StepRange(int(o.esp_height), 100, 250, 5, step));
             std::snprintf(text, sizeof(text), o.esp_height == 180 ? "%.2f M (DEFAULT)" : "%.2f M", double(o.esp_height) / 100.0);
             return true;
@@ -678,7 +636,6 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
             return true;
         }
         case kHeadHeight:
-            // 40% to 100% of 1.80 m in steps of 5
             if (step) o.head_height = uint32_t(StepRange(int(o.head_height), 40, 100, 5, step));
             std::snprintf(text, sizeof(text), o.head_height == 90 ? "%u%% (DEFAULT)" : "%u%%", o.head_height);
             return true;
@@ -689,19 +646,16 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
         case kEspOffGreen: ColorChannel(o.esp_off_color, 1, step, text); return true;
         case kEspOffBlue: ColorChannel(o.esp_off_color, 2, step, text); return true;
         case kGameSpeed:
-            // 25% to 200% in steps of 25
             if (step) o.game_speed = uint32_t(StepRange(int(o.game_speed), 25, 200, 25, step));
             std::snprintf(text, sizeof(text), o.game_speed == 100 ? "%u%% (DEFAULT)" : "%u%%", o.game_speed);
             return true;
         case kCrosshairMode: {
-            // 0 dot (•), 1 cross (+), 2 star (*)
             static constexpr uint32_t kValues[] = {0, 1, 2};
             static const char* const kNames[] = {"DOT", "CROSS", "STAR"};
             std::snprintf(text, sizeof(text), "%s", kNames[StepTable(kValues, o.crosshair_mode, step)]);
             return true;
         }
         case kCrosshairSize:
-            // 50% to 300% in steps of 10
             if (step) o.crosshair_size = uint32_t(StepRange(int(o.crosshair_size), 50, 300, 10, step));
             std::snprintf(text, sizeof(text), "%u%%", o.crosshair_size);
             return true;
@@ -713,7 +667,6 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
     }
 }
 
-// the general, mouse and keyboard rows that are no ON / OFF, stepped first
 void StepInputRow(int id, int step, char (&text)[64]) {
     game::Options& o = game::Opt();
     switch (id) {
@@ -721,7 +674,6 @@ void StepInputRow(int id, int step, char (&text)[64]) {
             std::snprintf(text, sizeof(text), "%s", kAudioOutputNames[StepTable(kAudioOutputs, o.audio_output, step)]);
             break;
         case kSensitivity:
-            // 0.1 to 5.0 in steps of 0.1
             if (step) {
                 int tenths = StepRange(int(std::lround(o.mouse_sensitivity * 10.0f)), 1, 50, 1, step);
                 o.mouse_sensitivity = float(tenths) / 10.0f;
@@ -729,7 +681,6 @@ void StepInputRow(int id, int step, char (&text)[64]) {
             std::snprintf(text, sizeof(text), "%.1f", o.mouse_sensitivity);
             break;
         case kTouchSensitivity:
-            // as the mouse's: 0.1 to 5.0 in steps of 0.1
             if (step) {
                 int tenths = StepRange(int(std::lround(o.touch_sensitivity * 10.0f)), 1, 50, 1, step);
                 o.touch_sensitivity = float(tenths) / 10.0f;
@@ -737,12 +688,10 @@ void StepInputRow(int id, int step, char (&text)[64]) {
             std::snprintf(text, sizeof(text), "%.1f", o.touch_sensitivity);
             break;
         case kWalkSpeed:
-            // 10% to 100% in steps of 5
             if (step) o.walk_speed = uint32_t(StepRange(int(o.walk_speed), 10, 100, 5, step));
             std::snprintf(text, sizeof(text), "%u%%", o.walk_speed);
             break;
         case kGyro: {
-            // off, always on, while firing, while aiming: as gyro::Mode
             static const char* const kGyroNames[] = {"OFF", "ALWAYS", "WHILE FIRING", "WHILE AIMING"};
             constexpr int kGyroCount = int(std::size(kGyroNames));
             if (step) gyro::SetMode(uint32_t(StepIndex(int(gyro::CurrentMode()), step, kGyroCount)));
@@ -750,7 +699,6 @@ void StepInputRow(int id, int step, char (&text)[64]) {
             break;
         }
         case kTouchLayout:
-            // the presets, CUSTOM once a control was moved
             if (step) touch::StepLayout(step);
             std::snprintf(text, sizeof(text), "%s", touch::LayoutName());
             break;
@@ -767,22 +715,18 @@ void StepInputRow(int id, int step, char (&text)[64]) {
             std::snprintf(text, sizeof(text), "%s", touch::SkinName());
             break;
         case kTouchStick:
-            // under the thumb where it comes down, or fixed in its place
             if (step) touch::StepStickMode(step);
             std::snprintf(text, sizeof(text), "%s", touch::StickModeName());
             break;
         case kTouchFireLook:
-            // which fire buttons turn the view when dragged
             if (step) touch::StepFireLook(step);
             std::snprintf(text, sizeof(text), "%s", touch::FireLookName());
             break;
         case kTouchAim:
-            // a tap keeps aim on, a hold aims while held; for every input
             if (step) touch::StepAimMode(step);
             std::snprintf(text, sizeof(text), "%s", touch::AimModeName());
             break;
         case kTouchEdit:
-            // any step opens the editor over the screen; from the panel it closes, the editor is on the screen alone
             if (step) {
                 touch::EditLayout();
                 if (MenuOpen()) ToggleMenu();
@@ -790,18 +734,15 @@ void StepInputRow(int id, int step, char (&text)[64]) {
             std::snprintf(text, sizeof(text), "OPEN");
             break;
         case kCheckUpdates:
-            // any step asks; the answer comes in a dialog over the game
             if (step) host::CheckForUpdates();
             std::snprintf(text, sizeof(text), "CHECK");
             break;
         case kGyroSensitivity:
-            // 0.1 to 5.0 in steps of 0.1
             if (step) gyro::SetSensitivity(float(StepRange(int(std::lround(gyro::Sensitivity() * 10.0f)), 1, 50, 1, step)) / 10.0f);
             std::snprintf(text, sizeof(text), "%.1f", gyro::Sensitivity());
             break;
         case kGyroInvertX:
         case kGyroInvertY: {
-            // kept with the gyro's other settings in android.toml, so not one of ToggleFlag's
             bool x = gyro::InvertX(), y = gyro::InvertY();
             if (step) (id == kGyroInvertX ? x : y) ^= true;
             if (step) gyro::SetInvert(x, y);
@@ -810,7 +751,6 @@ void StepInputRow(int id, int step, char (&text)[64]) {
         }
         case kLeftDeadzone:
         case kRightDeadzone: {
-            // 0% to 50% of the stick's travel in steps of 1, 0 leaves the game's own
             uint32_t& dz = id == kLeftDeadzone ? o.left_deadzone : o.right_deadzone;
             if (step) dz = uint32_t(StepRange(int(dz), 0, 50, 1, step));
             std::snprintf(text, sizeof(text), dz ? "%u%%" : "%u%% (DEFAULT)", dz);
@@ -818,7 +758,6 @@ void StepInputRow(int id, int step, char (&text)[64]) {
         }
         case kLeftSensitivity:
         case kRightSensitivity: {
-            // 0.1 to 3.0 in steps of 0.1
             float& s = id == kLeftSensitivity ? o.left_sensitivity : o.right_sensitivity;
             if (step) s = float(StepRange(int(std::lround(s * 10.0f)), 1, 30, 1, step)) / 10.0f;
             std::snprintf(text, sizeof(text), "%.1f", s);
@@ -828,7 +767,6 @@ void StepInputRow(int id, int step, char (&text)[64]) {
             int count = int(std::size(game::kLanguages));
             int i = 0;
             while (i < count - 1 && o.language != game::kLanguages[i]) i++;
-            // past the languages this disc has no strings for; English and Indonesian are always there
             if (step) {
                 do i = StepIndex(i, step, count);
                 while (!game::LanguageAvailable(game::kLanguages[i]));
@@ -839,31 +777,20 @@ void StepInputRow(int id, int step, char (&text)[64]) {
             break;
         }
         case kAutoUpdate: {
-            // Mendapatkan lingkungan JNI dari SDL / Native Activity
             JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
             jobject activity = (jobject)SDL_GetAndroidActivity();
             if (env && activity) {
                 jclass clazz = env->GetObjectClass(activity);
-
-                // Membaca status saat ini dari SharedPreferences via Java method
                 jmethodID getMethod = env->GetStaticMethodID(clazz, "isStartupCheckEnabled", "(Landroid/content/Context;)Z");
                 bool auto_check = true;
-                if (getMethod) {
-                    auto_check = env->CallStaticBooleanMethod(clazz, getMethod, activity);
-                }
-
-                // Jika tombol ditekan (step != 0), ubah statusnya (toggle)
+                if (getMethod) auto_check = env->CallStaticBooleanMethod(clazz, getMethod, activity);
                 if (step) {
                     auto_check = !auto_check;
                     jmethodID setMethod = env->GetStaticMethodID(clazz, "setStartupCheckEnabled", "(Landroid/content/Context;Z)V");
-                    if (setMethod) {
-                        env->CallStaticVoidMethod(clazz, setMethod, activity, (jboolean)auto_check);
-                    }
+                    if (setMethod) env->CallStaticVoidMethod(clazz, setMethod, activity, (jboolean)auto_check);
                 }
-
                 env->DeleteLocalRef(clazz);
                 env->DeleteLocalRef(activity);
-
                 std::snprintf(text, sizeof(text), "%s", OnOff(auto_check));
             } else {
                 std::snprintf(text, sizeof(text), "OFF");
@@ -873,7 +800,6 @@ void StepInputRow(int id, int step, char (&text)[64]) {
     }
 }
 
-// steps the value first when step is not zero
 std::string RowText(int id, int step, Settings& s = Get()) {
     char text[64] = "";
     if (bool* on = ToggleFlag(s, id)) {
@@ -895,7 +821,6 @@ std::string KeyText(std::string keys) {
     return keys;
 }
 
-// as options_menu.cpp's pages: 0 graphics
 constexpr int kTouchPage = 1;
 constexpr int kGeneralPage = 2;
 constexpr int kKeyboardPage = 3;
@@ -957,7 +882,6 @@ void RestoreDefaults(int page) {
     o.hold_aim = keep.hold_aim;
     o.walk_speed = keep.walk_speed;
     o.keys = keep.keys;
-    // the cheats page has its own defaults
     o.infinite_ammo = keep.infinite_ammo;
     o.rapid_fire = keep.rapid_fire;
     o.rapid_fire_extra = keep.rapid_fire_extra;
@@ -993,15 +917,14 @@ void RestoreDefaults(int page) {
     Changed();
 }
 
-// the row being rebound, -1 when idle; its keys must be released before the next press binds
 std::atomic<int> g_capture{-1};
-int g_capture_slot = 0;  // its box: 0 the key, 1 the alternate
-int g_hovered_box = -1;  // the box under the mouse or focused with a key in it, this frame
+int g_capture_slot = 0;
+int g_hovered_box = -1;
 bool g_capture_armed = false;
-int g_capture_done = 0;  // frame of the last bind, the key that bound must not start another
+int g_capture_done = 0;
 int g_page = kCheatsPage;
-std::atomic<bool> g_page_flip{false};  // the pad's L1 or R1, taken by the next frame
-// the action's key and its alternate as their boxes show them, the alternate blank when there is none
+std::atomic<bool> g_page_flip{false};
+
 std::vector<std::string> KeyBoxes(size_t action) {
     std::string keys = input::Binding(action);
     size_t comma = keys.find(',');
@@ -1012,10 +935,8 @@ std::vector<std::string> KeyBoxes(size_t action) {
     return {KeyText(keys.substr(0, comma)), second};
 }
 
-constexpr float kKeyBoxEms = 10.0f;  // a key box's width when the row has two
+constexpr float kKeyBoxEms = 10.0f;
 
-// label left, a box per key right (the key and its alternate side by side), ending where the other rows' values do;
-// Enter or click starts a box's capture, right click or Delete sets `cleared`; returns the box, -1 for none
 int BindRow(const char* label, const std::vector<std::string>& keys, int capturing, int& cleared) {
     const ImGuiStyle& style = ImGui::GetStyle();
     RowBox row = MeasureRow();
@@ -1037,7 +958,6 @@ int BindRow(const char* label, const std::vector<std::string>& keys, int capturi
         bool lit = capturing == i || ImGui::IsItemFocused() || ImGui::IsItemHovered();
         ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
                                                   ImGui::GetColorU32(lit ? ImGuiCol_Header : ImGuiCol_FrameBg));
-        // key names as they are
         std::string value = keys[i];
         if (capturing == i) value = Ui("PRESS A KEY");
         else if (value == kUnbound) value = Ui(kUnbound);
@@ -1054,7 +974,6 @@ int BindRow(const char* label, const std::vector<std::string>& keys, int capturi
     return pressed;
 }
 
-// Escape cancels, any other bindable key or mouse button binds
 void PollCapture() {
     if (g_capture < 0) return;
     int vk = input::PressedKey();
@@ -1068,7 +987,6 @@ void PollCapture() {
     g_capture_done = ImGui::GetFrameCount();
 }
 
-// not under a bind or on the button that just bound
 bool CaptureFree() { return g_capture < 0 && ImGui::GetFrameCount() > g_capture_done + 1; }
 
 void ValueRow(const Row& r) {
@@ -1079,7 +997,6 @@ void ValueRow(const Row& r) {
 void KeyRow(const Row& r) {
     int cleared = -1;
     int box = BindRow(r.label, KeyBoxes(size_t(r.id)), g_capture == r.id ? g_capture_slot : -1, cleared);
-    // a Delete that answered a capture is no clear
     if (cleared >= 0 && CaptureFree()) input::Bind(size_t(r.id), 0, cleared);
     if (box < 0 || !CaptureFree()) return;
     g_capture_slot = box;
@@ -1096,7 +1013,6 @@ void DrawList(const Row* list, size_t count) {
     }
 }
 
-// the touch controls page ends with the sticks', which the game's options show on its control setup page
 void DrawRows(int page) {
     size_t count = 0;
     const Row* list = rows::Page(page, &count);
@@ -1106,8 +1022,6 @@ void DrawRows(int page) {
     DrawList(kControllerRows, std::size(kControllerRows));
 }
 
-// under the cheats, the level's weapons as buttons (weapons.cpp: any weapon in any level); the one given goes in the
-// slot not in hand and the game switches to it
 void DrawWeapons() {
     weapons::View v = weapons::Current();
     Section("GIVE A WEAPON");
@@ -1120,25 +1034,19 @@ void DrawWeapons() {
     constexpr int kColumns = 3;
     float gap = ImGui::GetStyle().ItemSpacing.x;
     float w = (ImGui::GetContentRegionAvail().x - gap * (kColumns - 1)) / kColumns;
-    // two groups (weapons.cpp sorts them): the game's own suppressors, then the rest; each starts a new row of columns
-    struct GroupTitle {
-        const char* name;  // brighter
-        const char* hint;  // dim, beside it
-    };
+    struct GroupTitle { const char* name; const char* hint; };
     static const GroupTitle kGroupTitles[] = {{"SUPPORTED SUPPRESSOR", "PRESS Y TO TAKE IT OFF"},
                                               {"UNSUPPORTED SUPPRESSOR", "EXPERIMENTAL"}};
-    // the second group has two blocks, each with a dim heading of its own
     auto sub_title = [](const char* text) {
         ImGui::PushStyleColor(ImGuiCol_Text, kDim);
         ImGui::TextUnformatted(Ui(text).c_str());
         ImGui::PopStyleColor();
     };
     bool sound_only = false;
-    int group = -1, column = 0, variant = -1;  // variant: 0 the plain guns, 1 those with the suppressor (code bit 0x100)
+    int group = -1, column = 0, variant = -1;
     for (size_t i = 0; i < v.choices.size(); i++) {
         const weapons::Choice& c = v.choices[i];
         if (c.group == group && variant != ((c.type & 0x100) ? 1 : 0)) {
-            // the second block of a group starts on a row of its own
             variant = (c.type & 0x100) ? 1 : 0;
             column = 0;
             ImGui::Dummy(ImVec2(0, ImGui::GetFontSize() * 0.15f));
@@ -1150,7 +1058,7 @@ void DrawWeapons() {
             column = 0;
             const GroupTitle& title = kGroupTitles[std::clamp(group, 0, 1)];
             ImGui::Dummy(ImVec2(0, ImGui::GetFontSize() * 0.25f));
-            ImGui::TextUnformatted(Ui(title.name).c_str());  // the panel's own text colour
+            ImGui::TextUnformatted(Ui(title.name).c_str());
             ImGui::SameLine();
             ImGui::PushStyleColor(ImGuiCol_Text, kDim);
             ImGui::TextUnformatted(Ui(title.hint).c_str());
@@ -1160,13 +1068,13 @@ void DrawWeapons() {
         }
         if (column++ % kColumns) ImGui::SameLine();
         ImGui::PushID(c.type);
-        if (c.held) ImGui::PushStyleColor(ImGuiCol_Text, kHeading);  // in one of the two slots now
+        if (c.held) ImGui::PushStyleColor(ImGuiCol_Text, kHeading);
         if (ImGui::Button(c.label.c_str(), ImVec2(w, 0))) weapons::Give(c.type);
         if (c.held) ImGui::PopStyleColor();
         ImGui::PopID();
         sound_only = sound_only || c.sound_only;
     }
-    if (sound_only) {  // the star of those labels, under the last block
+    if (sound_only) {
         ImGui::PushStyleColor(ImGuiCol_Text, kDim);
         ImGui::TextUnformatted(Ui("* SILENCED SOUND ONLY").c_str());
         ImGui::PopStyleColor();
@@ -1191,10 +1099,7 @@ void Defaults() {
     RestoreDefaults(g_page);
 }
 
-// the panel's pages as tabs: the cheats, the touch controls, and the mouse and keyboard while one is in use; the pad's
-// L1 and R1 switch them
 void DrawTabs() {
-    // MOUSE AND KEYBOARD is a third page while a mouse or keyboard is the input in use; a pad or the touch screen hides it
     const bool keys = input::KeyboardActive();
     if (g_page_flip.exchange(false)) {
         if (g_page == kCheatsPage) g_page = kTouchPage;
@@ -1203,15 +1108,12 @@ void DrawTabs() {
     }
     if (g_page != kCheatsPage && g_page != kTouchPage && g_page != kKeyboardPage) g_page = kCheatsPage;
     if (g_page == kKeyboardPage && !keys) g_page = kCheatsPage;
-    struct Tab {
-        int page;
-        const char* label;
-    };
+    struct Tab { int page; const char* label; };
     static const Tab kTabs[] = {{kCheatsPage, "CHEATS"}, {kTouchPage, "CONTROLS"}, {kKeyboardPage, "MOUSE AND KEYBOARD"}};
     const size_t count = keys ? std::size(kTabs) : std::size(kTabs) - 1;
     float gap = ImGui::GetStyle().ItemSpacing.x;
     float w = (ImGui::GetContentRegionAvail().x - gap * float(count - 1)) / float(count);
-    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);  // the d-pad stays on the rows
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
     for (size_t i = 0; i < count; i++) {
         if (i) ImGui::SameLine();
         bool on = g_page == kTabs[i].page;
@@ -1224,7 +1126,6 @@ void DrawTabs() {
     ImGui::PopItemFlag();
 }
 
-// the hint line, then Back and Defaults on the right
 void DrawFooter(float em) {
     ImGui::Separator();
     ImGui::PushStyleColor(ImGuiCol_Text, kDim);
@@ -1236,7 +1137,6 @@ void DrawFooter(float em) {
     ImGui::TextUnformatted(Ui(hint, false).c_str());
     ImGui::PopStyleColor();
     float bw = em * 8;
-    // Defaults restores the cheats or the keys; the touch page has no undo of its own
     bool defaults = g_page == kCheatsPage || g_page == kKeyboardPage;
     float buttons_pad = ImGui::GetContentRegionAvail().x - bw * (defaults ? 2 : 1) - (defaults ? ImGui::GetStyle().ItemSpacing.x : 0);
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(buttons_pad, 0.0f));
@@ -1247,14 +1147,11 @@ void DrawFooter(float em) {
     }
 }
 
-// in the rows' child: a finger dragged up or down scrolls them as a phone's lists do, then glides a little when it
-// lifts. Past half an em the press is the scroll's, so the row or weapon it came down on is not clicked
 void DragScroll(float em) {
-    constexpr float kFriction = 6.0f;  // of the glide's speed lost a second
+    constexpr float kFriction = 6.0f;
     static bool dragging = false;
-    static float glide = 0;  // pixels a second
+    static float glide = 0;
     ImGuiIO& io = ImGui::GetIO();
-    // the rows, not the scrollbar beside them: that drags as it always did
     bool inside = ImGui::GetCurrentWindow()->InnerRect.Contains(io.MouseClickedPos[0]);
     if (ImGui::IsMouseClicked(0)) {
         dragging = false;
@@ -1264,7 +1161,7 @@ void DragScroll(float em) {
         if (!dragging && std::fabs(ImGui::GetMouseDragDelta(0).y) > em * 0.5f) dragging = true;
         if (!dragging) return;
         ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
-        if (io.DeltaTime > 0) glide = (glide - io.MouseDelta.y / io.DeltaTime) * 0.5f;  // smoothed over frames
+        if (io.DeltaTime > 0) glide = (glide - io.MouseDelta.y / io.DeltaTime) * 0.5f;
         ImGui::ClearActiveID();
         return;
     }
@@ -1277,26 +1174,19 @@ void DragScroll(float em) {
     glide *= std::max(0.0f, 1.0f - kFriction * io.DeltaTime);
 }
 
-// the font's size as a share of the screen's height, and the most of its width the panel's fifty ems may take; the panel
-// is sized for a thumb: the smaller of the two wins, so a tall screen and a narrow one both fit
 constexpr float kUiHeightShare = 0.030f;
 constexpr float kUiWidthShare = 0.0192f;
 
 void DrawPanel() {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     float em = ImGui::GetFontSize();
-    // below the touch button at the top centre, and short enough to leave the HUD's corners in view; what does not
-    // fit scrolls
-    ImGui::SetNextWindowPos(ImVec2(vp->GetCenter().x, vp->Pos.y + vp->Size.y * 0.12f), ImGuiCond_Always,
-                            ImVec2(0.5f, 0.0f));
-    ImGui::SetNextWindowSize(ImVec2(std::min(em * 50, vp->Size.x * 0.96f), std::min(em * 32, vp->Size.y * 0.84f)),
-                             ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(vp->GetCenter().x, vp->Pos.y + vp->Size.y * 0.12f), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(std::min(em * 50, vp->Size.x * 0.96f), std::min(em * 32, vp->Size.y * 0.84f)), ImGuiCond_Always);
     for (const auto& [col, color] : kPanelColors) ImGui::PushStyleColor(col, color);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(em * 1.6f, em * 0.9f));
-    // taller buttons and rows with room between them: a thumb, not a mouse
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(em * 0.7f, em * 0.45f));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(em * 0.6f, em * 0.25f));
     constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
@@ -1305,13 +1195,12 @@ void DrawPanel() {
         DrawTabs();
         ImGui::Separator();
         float footer = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeightWithSpacing() + em;
-        // a scrollbar a thumb can take, not the desktop's thin one
         ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, em * 1.4f);
         ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarRounding, 0.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, em * 2.5f);
         ImGui::BeginChild("##rows", ImVec2(0, -footer), ImGuiChildFlags_NavFlattened);
         static int s_shown = -1;
-        if (s_shown != g_page) {  // the other page starts at its top
+        if (s_shown != g_page) {
             ImGui::SetScrollY(0);
             s_shown = g_page;
         }
@@ -1328,14 +1217,12 @@ void DrawPanel() {
     ImGui::PopStyleColor(int(std::size(kPanelColors)));
 }
 
-// the window's display's refresh rate, 0 when unreadable
 uint32_t RefreshRate() {
     SDL_Window* w = static_cast<SDL_Window*>(Window());
     const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(w ? SDL_GetDisplayForWindow(w) : SDL_GetPrimaryDisplay());
     return m && m->refresh_rate > 1 ? uint32_t(std::lround(m->refresh_rate)) : 0;
 }
 
-// as app::Pace, at this cap
 void PaceAt(uint32_t cap) {
     using clock = std::chrono::steady_clock;
     static clock::time_point next = clock::now();
@@ -1358,33 +1245,17 @@ void PaceFrame() {
         Pace();
         return;
     }
-    // a few under, so a variable refresh display stays in its range and vsync never waits a whole refresh
     constexpr uint32_t kRefreshMargin = 3;
     uint32_t rate = RefreshRate();
     PaceAt(rate > kRefreshMargin ? rate - kRefreshMargin : 0);
 }
 
 const rows::Row* rows::Page(int page, size_t* count) {
-    if (page == kKeyboardPage) {
-        *count = InputRows().size();
-        return InputRows().data();
-    }
-    if (page == kCheatsPage) {
-        *count = std::size(kCheatRows);
-        return kCheatRows;
-    }
-    if (page == kCreditsPage) {
-        *count = CreditRows().size();
-        return CreditRows().data();
-    }
-    if (page == kTouchPage) {
-        *count = std::size(kTouchRows);
-        return kTouchRows;
-    }
-    if (page == kGeneralPage) {
-        *count = std::size(kGeneralRows);
-        return kGeneralRows;
-    }
+    if (page == kKeyboardPage) { *count = InputRows().size(); return InputRows().data(); }
+    if (page == kCheatsPage) { *count = std::size(kCheatRows); return kCheatRows; }
+    if (page == kCreditsPage) { *count = CreditRows().size(); return CreditRows().data(); }
+    if (page == kTouchPage) { *count = std::size(kTouchRows); return kTouchRows; }
+    if (page == kGeneralPage) { *count = std::size(kGeneralRows); return kGeneralRows; }
     *count = std::size(kGraphicsRows);
     return kGraphicsRows;
 }
@@ -1397,7 +1268,6 @@ const rows::Row* rows::Controller(size_t* count) {
 std::string rows::Value(const Row& row, int step) {
     if (row.kind == Kind::Bind) return KeyText(input::Binding(size_t(row.id)));
     if (row.id == kCredit) {
-        // a step on a link opens it
         const Credit* c = CreditOf(row);
         if (!c || !c->value) return " ";
         if (step && c->url) SDL_OpenURL(c->url);
@@ -1407,11 +1277,8 @@ std::string rows::Value(const Row& row, int step) {
 }
 
 void rows::Defaults(int page) { RestoreDefaults(page); }
-
-// the recomp's own pages share one set of defaults, too much to undo from one of them
 bool rows::Restorable(int page) { return page == kKeyboardPage || page == kCheatsPage; }
 
-// the dynamic resolution's rows while it is on, RENDER RESOLUTION while it is off
 bool rows::Enabled(const Row& row) {
     if (row.kind != Kind::Value) return true;
     bool dynamic = game::Opt().dynamic_resolution;
@@ -1426,14 +1293,11 @@ bool rows::Enabled(const Row& row) {
 }
 
 bool rows::Opens(const Row& row) {
-    // the credits' rows have no arrows: the links open, the rest do nothing
     return row.kind == Kind::Value && (row.id == kTouchEdit || row.id == kCheckUpdates || row.id == kCredit);
 }
 
 bool MenuOpen() { return g_open.load(std::memory_order_relaxed); }
-
 bool Capturing() { return g_capture >= 0; }
-
 void SwitchPanelPage() { g_page_flip.store(true); }
 
 void PanelStep(int dir) {
@@ -1453,8 +1317,7 @@ void DrawUi(double fps) {
     ImGuiIO& io = ImGui::GetIO();
     if (MenuOpen()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
     else io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
-    io.KeyRepeatRate = 0.1f;  // held arrows step ten times a second, ImGui's twenty is too fast for settings
-    // scale the font with the output: the font's own pixel size is the size drawn now over the scale it is drawn at
+    io.KeyRepeatRate = 0.1f;
     float base_px = ImGui::GetFontSize() / std::max(io.FontGlobalScale, 0.01f);
     float em_px = std::min(io.DisplaySize.y * kUiHeightShare, io.DisplaySize.x * kUiWidthShare);
     io.FontGlobalScale = std::max(1.0f, em_px / base_px);
