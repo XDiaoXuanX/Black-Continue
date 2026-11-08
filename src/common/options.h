@@ -48,7 +48,7 @@ struct Options {
     uint32_t right_deadzone = 0;
     float left_sensitivity = 1.0f;
     float right_sensitivity = 1.0f;
-    uint32_t audio_output = 0;  // audio::kOutputAuto, kOutputStereo, kOutputSurround or kOutputMono
+    uint32_t audio_output = 0;  // audio::kOutputAuto, audio::kOutputStereo, audio::kOutputSurround or audio::kOutputMono
     std::string language = "int";  // one of kLanguages
     bool infinite_ammo = false;  // cheat: the player's magazine and reserve never go down
     // cheat: 1 OFF, 2-998 = times the game's rate of fire, 999 = INFINITE (no wait at all, every weapon fires each frame)
@@ -78,6 +78,17 @@ struct Options {
     uint32_t esp_height = 180;  // centimetres: the ESP box's height, and what the head and body points are taken from
     uint32_t esp_on_color = 0xFFFFFF;   // 0xRRGGBB, the lines and boxes of the enemies in the view
     uint32_t esp_off_color = 0xFF0000;  // the arrows to the enemies out of it
+
+    // rapid fire extra: RPG / Grenade Launcher / BNS M203 fire, and grenades throw, without any wait at all,
+    // whatever the RAPID FIRE level. The fire / throw animation is fast-forwarded so it completes in one frame
+    bool rapid_fire_extra = false;
+
+    // crosshair: a marker at the middle of the view, drawn by esp.cpp in the same 2D pass as the ESP
+    bool crosshair = false;               // draw it at all
+    uint32_t crosshair_mode = 0;          // 0 dot (•), 1 cross (+), 2 star (*)
+    uint32_t crosshair_size = 100;        // percent of the base arm length (50..300)
+    uint32_t crosshair_color = 0x00FF00;  // 0xRRGGBB, default green
+
     std::map<std::string, std::string> keys;  // action id to key names, absent is the default
 };
 Options& Opt();
@@ -100,8 +111,7 @@ inline std::atomic<uint32_t> g_grenade_skip_clip{0};     // the throw animation 
 inline std::atomic<int> g_grenade_skip_frames{0};        // frames left to hold it at its end
 
 // rapid fire extra for the launchers (RPG, GRL, BNS M203): a shot was seen (hooks.cpp sets it), the animation
-// controller captures the fire clip (or whatever non-idle clip is playing) and holds its time at its length so
-// the fire animation completes in one frame and the next shot can start at once, exactly like the grenade throw
+// controller captures the fire clip and holds its time at its length, so the fire animation completes in one frame
 inline std::atomic<bool> g_launcher_skip_request{false};  // a shot happened, capture the clip on the next AC update
 inline std::atomic<uint32_t> g_launcher_skip_clip{0};     // the fire animation clip being fast-forwarded
 inline std::atomic<int> g_launcher_skip_frames{0};        // frames left to hold it at its end
