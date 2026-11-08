@@ -18,7 +18,6 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
-
 #include "app/app.h"
 #include "audio/output.h"
 #include "common/keys.h"
@@ -29,7 +28,7 @@
 #include "game/weapons.h"
 
 namespace game {
-void EspOverlay();  // esp.cpp
+void EspOverlay();
 }
 
 namespace gyro {
@@ -76,7 +75,7 @@ void CheckForUpdates();
 
 namespace app {
 
-Settings DefaultSettings();  // native/main.cpp: a phone's first run, unlimited frame rate and vsync off
+Settings DefaultSettings();
 
 namespace {
 
@@ -118,8 +117,7 @@ const char* const kScreenFilterNames[] = {"OFF",  "CRT LIGHT", "CRT STRONG",   "
 constexpr uint32_t kAudioOutputs[] = {audio::kOutputAuto, audio::kOutputMono, audio::kOutputStereo,
                                       audio::kOutputSurround};
 const char* const kAudioOutputNames[] = {"AUTOMATIC", "MONO", "2.0 STEREO", "5.1 SURROUND"};
-const char* const kLanguageNames[] = {"ENGLISH", "FRENCH", "GERMAN", "ITALIAN", "SPANISH",
-                                      "INDONESIAN"};  // as game::kLanguages
+const char* const kLanguageNames[] = {"ENGLISH", "FRENCH", "GERMAN", "ITALIAN", "SPANISH", "INDONESIAN"};
 constexpr uint32_t kFpsCaps[] = {30, 60, 75, 90, 120, 144, 165, 240, 360, kFpsCapRefresh, 0};
 
 int StepIndex(int index, int step, int count) {
@@ -439,6 +437,7 @@ const std::vector<Row>& InputRows() {
     return list;
 }
 
+// NOTE: kRapidFireExtra dihilangkan dari ToggleFlag — sekarang step value (StepCheatRow)
 bool* ToggleFlag(Settings& s, int id) {
     game::Options& o = game::Opt();
     switch (id) {
@@ -466,7 +465,6 @@ bool* ToggleFlag(Settings& s, int id) {
         case kEspHealth: return &o.esp_health;
         case kDynamicRes: return &o.dynamic_resolution;
         case kCrosshair: return &o.crosshair;
-        case kRapidFireExtra: return &o.rapid_fire_extra;
         default: return nullptr;
     }
 }
@@ -565,12 +563,13 @@ void ColorChannel(uint32_t& packed, int channel, int step, char (&text)[64]) {
     std::snprintf(text, sizeof(text), "%d", value);
 }
 
+// NOTE: kRapidFireExtra DITAMBAHKAN di sini sebagai step value (1-999, 999=INFINITE)
 bool StepCheatRow(int id, int step, char (&text)[64]) {
     game::Options& o = game::Opt();
     switch (id) {
         case kRapidFire: {
-            // 1 OFF, 2-998 = times the game's rate of fire, 999 INFINITE. The step grows with the value so the whole
-            // 1-999 range is reachable with the arrows: 1 below 10, 10 below 100, 100 above
+            // 1 OFF, 2-998 = times the game's rate of fire, 999 INFINITE. The step grows with the value so the
+            // whole 1-999 range is reachable with the arrows: 1 below 10, 10 below 100, 100 above
             if (step) {
                 int v = int(o.rapid_fire);
                 int inc = v < 10 ? 1 : v < 100 ? 10 : 100;
@@ -582,6 +581,21 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
             if (o.rapid_fire <= 1) std::snprintf(text, sizeof(text), "OFF");
             else if (o.rapid_fire >= 999) std::snprintf(text, sizeof(text), "INFINITE");
             else std::snprintf(text, sizeof(text), "%uX", o.rapid_fire);
+            return true;
+        }
+        case kRapidFireExtra: {
+            // same smart step as kRapidFire: 1-999, 999 = INFINITE. Applies to RPG/GRL/BNS-M203 and grenade throws
+            if (step) {
+                int v = int(o.rapid_fire_extra);
+                int inc = v < 10 ? 1 : v < 100 ? 10 : 100;
+                v += inc * step;
+                if (v < 1) v = (step < 0) ? 999 : 1;
+                if (v > 999) v = 999;
+                o.rapid_fire_extra = uint32_t(v);
+            }
+            if (o.rapid_fire_extra <= 1) std::snprintf(text, sizeof(text), "OFF");
+            else if (o.rapid_fire_extra >= 999) std::snprintf(text, sizeof(text), "INFINITE");
+            else std::snprintf(text, sizeof(text), "%uX", o.rapid_fire_extra);
             return true;
         }
         case kAimView: {
