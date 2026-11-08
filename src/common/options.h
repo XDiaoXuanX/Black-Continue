@@ -12,111 +12,98 @@ namespace game {
 inline constexpr const char* kLanguages[] = {"int", "fra", "deu", "ita", "esp", "ind"};
 
 struct Options {
-    bool skip_intros = false;  // logos at boot and the film after pressing start
+    bool skip_intros = false;
     bool fps_counter = false;
-    uint32_t fmv_scale = 0;  // 4:3 films on a wider screen: 0 fill it, top and bottom cut; 1 kept 4:3
-    // a look over the frame: 0 none, 1 and 2 a CRT (light, strong), 3 sharpen, 4 vibrant, 5 noir, 6 sepia,
-    // 7 night vision, 8 VHS
+    uint32_t fmv_scale = 0;
     uint32_t screen_filter = 0;
     bool reload_blur = true;
-    bool bloom = true;  // the glow added over bright parts of the frame (native/vulkan.cpp)
+    bool bloom = true;
     bool fog = true;
-    uint32_t anti_aliasing = 0;  // 0 off, 1 FXAA as the frame goes onto the screen, 2 SSAA: twice the resolution
-    // ARM Mali GPUs (MediaTek too) draw the glow passes saturated: 0 off, 1 auto (the shader fix on Mali only),
-    // 2 shader fix, 3 glow passes dropped, 4 both, 5 full precision shaders, 6 every glow-like pass dropped, 7 the shader
-    // fix, full precision and the wide drop; a change applies at once (native/vulkan.cpp)
+    uint32_t anti_aliasing = 0;
     uint32_t mali_fix = 1;
-    bool hdr = false;  // a tone map that brings back the colours the console's overbright look burns out
-    uint32_t draw_distance = 1;  // times the game's LOD and draw distances
-    // the render resolution follows the frame rate (native/dynamic_resolution.cpp): down when it falls under the
-    // target, up again once it holds the target this many seconds; within min and max, percent of the screen's
+    bool hdr = false;
+    uint32_t draw_distance = 1;
     bool dynamic_resolution = false;
     uint32_t dynamic_target_fps = 60;
     uint32_t dynamic_min_percent = 40;
     uint32_t dynamic_max_percent = 100;
     uint32_t dynamic_hold = 5;
     float mouse_sensitivity = 1.0f;
-    float touch_sensitivity = 1.0f;  // the touch screen's look, apart from the mouse's
+    float touch_sensitivity = 1.0f;
     bool invert_mouse = false;
-    bool hold_aim = true;  // scopes too, keyboard and mouse
-    uint32_t fov = 70;  // horizontal degrees on a 4:3 frame, 70 is the game's
-    uint32_t viewmodel_fov = 70;  // the gun and arms, the same measure
-    uint32_t walk_speed = 50;  // percent of running, while the walk key is held
-    // a controller's sticks: the radial dead zone as percent of the travel, 0 the game's own, and what the travel
-    // past it is scaled by; the left stick moves, the right looks
+    bool hold_aim = true;
+    uint32_t fov = 70;
+    uint32_t viewmodel_fov = 70;
+    uint32_t walk_speed = 50;
     uint32_t left_deadzone = 0;
     uint32_t right_deadzone = 0;
     float left_sensitivity = 1.0f;
     float right_sensitivity = 1.0f;
-    uint32_t audio_output = 0;  // audio::kOutputAuto, audio::kOutputStereo, audio::kOutputSurround or audio::kOutputMono
-    std::string language = "int";  // one of kLanguages
-    bool infinite_ammo = false;  // cheat: the player's magazine and reserve never go down
+    uint32_t audio_output = 0;
+    std::string language = "int";
+    bool infinite_ammo = false;
     // cheat: 1 OFF, 2-998 = times the game's rate of fire, 999 = INFINITE (no wait at all, every weapon fires each frame)
     uint32_t rapid_fire = 1;
-    bool no_recoil = false;  // cheat: the player's shots do not kick the view
-    bool steady_aim = true;  // the gun's idle sway is held still at the aim, every weapon (src/game/hooks.cpp); off: the game's own sway
-    uint32_t aim_view = 1;  // the aim's look: 0 ZOOM (the game's own, no move of the gun), 1 ADS (the gun moves to the middle, src/game/hooks.cpp)
-    bool no_kick = false;  // the fire clip's pose is held at its start: no kick animation, the shell casings still come (src/game/hooks.cpp)
-    uint32_t ads_custom = 0;  // the ADS rows: 0 the built in table (ads_view.txt as it was), 1 ADS_Custom.txt in SaveData
-    uint32_t game_speed = 100;  // cheat: percent of the game's speed, menus and films keep theirs
-    bool god_mode = false;  // cheat: no hit takes the player's health
-    bool one_hit_kill = false;  // cheat: any hit of the player's bullets kills
-    bool infinite_grenades = false;  // cheat: throwing a grenade keeps the count
-    bool infinite_medkits = false;  // cheat: using a medkit keeps the count (src/game/weapons.cpp)
-    bool unlock_levels = false;  // cheat: every mission open on every difficulty, the save is left as it is
-    bool unlock_black_ops = false;  // cheat: Black Ops open on the missions open on another difficulty, the same
-    uint32_t esp_style = 0;  // cheat: what is drawn on each living enemy in view: 0 off, 1 box, 2 line from the bottom of the screen, 3 both
-    bool esp_arrows = false;  // cheat: an arrow on a ring round the middle towards each enemy out of the view
-    bool aimbot = false;  // cheat, AUTO HEADSHOT: aiming in turns the view to the head of the enemy nearest the crosshair
-    uint32_t aim_assist = 0;  // cheat: 0 off, 1 to 3 a pull of the view to an enemy near the crosshair while firing or aiming
-    uint32_t head_height = 90;  // percent of 1.80 m, the height AUTO HEADSHOT turns the view to (not the ESP box's)
-    uint32_t head_offset = 30;  // centimetres plus 30: 0 is 30 left on the screen, 30 none, 60 is 30 right
-    uint32_t esp_label = 0;  // the plate over each enemy in view, drawn by ImGui: 0 off, 1 health, 2 distance, 3 both
-    uint32_t esp_label_show = 0;  // when the plate shows: 0 auto (always with a box or line, else after a hit), 1 always, 2 after a hit
-    bool esp_health = false;  // the health bar over each enemy in view
-    uint32_t esp_width = 8;  // tenths of a line of the 480 frame: the thickness of the ESP's box and line, 0 to 30
-    uint32_t esp_height = 180;  // centimetres: the ESP box's height, and what the head and body points are taken from
-    uint32_t esp_on_color = 0xFFFFFF;   // 0xRRGGBB, the lines and boxes of the enemies in the view
-    uint32_t esp_off_color = 0xFF0000;  // the arrows to the enemies out of it
+    bool no_recoil = false;
+    bool steady_aim = true;
+    uint32_t aim_view = 1;
+    bool no_kick = false;
+    uint32_t ads_custom = 0;
+    uint32_t game_speed = 100;
+    bool god_mode = false;
+    bool one_hit_kill = false;
+    bool infinite_grenades = false;
+    bool infinite_medkits = false;
+    bool unlock_levels = false;
+    bool unlock_black_ops = false;
+    uint32_t esp_style = 0;
+    bool esp_arrows = false;
+    bool aimbot = false;
+    uint32_t aim_assist = 0;
+    uint32_t head_height = 90;
+    uint32_t head_offset = 30;
+    uint32_t esp_label = 0;
+    uint32_t esp_label_show = 0;
+    bool esp_health = false;
+    uint32_t esp_width = 8;
+    uint32_t esp_height = 180;
+    uint32_t esp_on_color = 0xFFFFFF;
+    uint32_t esp_off_color = 0xFF0000;
 
-    // rapid fire extra: RPG / Grenade Launcher / BNS M203 fire, and grenades throw, without any wait at all,
-    // whatever the RAPID FIRE level. The fire / throw animation is fast-forwarded so it completes in one frame
-    bool rapid_fire_extra = false;
+    // rapid fire extra: the launchers fire at this multiplier (1 OFF, 2-998 = times the game's rate of fire,
+    // 999 = INFINITE, no wait at all). Applies to RPG and GRL (all their fire) and to the M203 under the barrel of
+    // the BNS (only the launcher, the M16 rifle above it uses RAPID FIRE). Like the grenade throw, the fire
+    // animation is fast-forwarded so it completes in one frame and the next shot can start at once. Its own level,
+    // whatever RAPID FIRE is set to
+    uint32_t rapid_fire_extra = 1;
 
     // crosshair: a marker at the middle of the view, drawn by esp.cpp in the same 2D pass as the ESP
-    bool crosshair = false;               // draw it at all
-    uint32_t crosshair_mode = 0;          // 0 dot (•), 1 cross (+), 2 star (*)
-    uint32_t crosshair_size = 100;        // percent of the base arm length (50..300)
-    uint32_t crosshair_color = 0x00FF00;  // 0xRRGGBB, default green
+    bool crosshair = false;
+    uint32_t crosshair_mode = 0;
+    uint32_t crosshair_size = 100;
+    uint32_t crosshair_color = 0x00FF00;
 
     std::map<std::string, std::string> keys;  // action id to key names, absent is the default
 };
 Options& Opt();
-// the language setting as this run started, the language the game boots in
 const std::string& BootLanguage();
-bool HasLanguages();  // language.cpp
-bool LanguageAvailable(const std::string& code);  // language.cpp: the LANGUAGE row offers it
-inline std::atomic<float> g_fps{0};  // from the host, for the game's own counter
-inline std::atomic<bool> g_hide_hud{false};  // the toggle HUD key: the gameplay HUD is not drawn
-// the view's zoom as the look update scales the turn by (src/game/mouse.cpp): 1 none, about 0.74 a rifle's sights,
-// a scope's levels under that (a half at X2, a quarter at X5)
+bool HasLanguages();
+bool LanguageAvailable(const std::string& code);
+inline std::atomic<float> g_fps{0};
+inline std::atomic<bool> g_hide_hud{false};
 inline std::atomic<float> g_zoom{1.0f};
-inline std::atomic<bool> g_focus_paused{false};  // the game thread waits while the app is in the background
-inline std::atomic<uint32_t> g_focus_pauses{0};  // focus pauses ended so far
+inline std::atomic<bool> g_focus_paused{false};
+inline std::atomic<uint32_t> g_focus_pauses{0};
 
-// rapid fire extra for grenades: a throw was seen (cheats.cpp sets it), the animation controller (hooks.cpp) reads it
-// on its next update, captures the throw clip and holds its time at its length so the animation completes in one frame
-inline std::atomic<bool> g_grenade_skip_request{false};  // a throw happened, capture the clip on the next AC update
-inline std::atomic<uint32_t> g_grenade_skip_clip{0};     // the throw animation clip being fast-forwarded
-inline std::atomic<int> g_grenade_skip_frames{0};        // frames left to hold it at its end
+inline std::atomic<bool> g_grenade_skip_request{false};
+inline std::atomic<uint32_t> g_grenade_skip_clip{0};
+inline std::atomic<int> g_grenade_skip_frames{0};
 
-// rapid fire extra for the launchers (RPG, GRL, BNS M203): a shot was seen (hooks.cpp sets it), the animation
-// controller captures the fire clip and holds its time at its length, so the fire animation completes in one frame
-inline std::atomic<bool> g_launcher_skip_request{false};  // a shot happened, capture the clip on the next AC update
-inline std::atomic<uint32_t> g_launcher_skip_clip{0};     // the fire animation clip being fast-forwarded
-inline std::atomic<int> g_launcher_skip_frames{0};        // frames left to hold it at its end
+inline std::atomic<bool> g_launcher_skip_request{false};
+inline std::atomic<uint32_t> g_launcher_skip_clip{0};
+inline std::atomic<int> g_launcher_skip_frames{0};
 
-void WaitWhileUnfocused();  // native/game_host.cpp: game thread, before the present
-bool HudShown();  // src/game/hud.cpp: the player's HUD drew lately, a hint's pause too
+void WaitWhileUnfocused();
+bool HudShown();
 
 }  // namespace game
