@@ -32,15 +32,15 @@ using namespace layout;
 namespace d3d {
 void ViewScale(float xy);
 void GunDraw(bool on, const float move[4]);
-void GunScale(float& sx, float& sy);  // d3d8.cpp: the projection's scale the gun was last drawn with
+void GunScale(float& sx, float& sy);
 }
 
 namespace game {
-void EspCamera();  // esp.cpp
+void EspCamera();
 }
 
 namespace touch {
-bool Firing();  // touch.cpp: a fire button of the touch controls, or a controller's right trigger, is held
+bool Firing();
 }
 
 namespace {
@@ -50,12 +50,10 @@ constexpr uint32_t kInitDefaultState = 0x271710;
 
 void WriteFloat(uint32_t va, float f) { std::memcpy(HostPtr(va), &f, 4); }
 
-// what the library's vertical blank interrupt does that the game sees: count, event, callback
 void VerticalBlank(X86Context& ctx) {
     uint32_t info = mem::AllocSystem(12);
     auto next = std::chrono::steady_clock::now();
     for (;;) {
-        // the film decoder paces on the count: it stands still through a focus pause
         while (game::g_focus_paused) {
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             next = std::chrono::steady_clock::now();
@@ -72,7 +70,6 @@ void VerticalBlank(X86Context& ctx) {
             W32(info + 8, 0);
             CallGuest(ctx, callback, {info});
         }
-        // the game clears the event itself before each wait, which the host object does not see
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         ResetEvent(*event);
     }
@@ -80,7 +77,6 @@ void VerticalBlank(X86Context& ctx) {
 
 }  // namespace
 
-// the viewport as D3DDevice_SetViewport stores it, for the game's own readers
 void StoreViewport(X86Context&, uint8_t*) {
     std::lock_guard<std::recursive_mutex> lock(d3d::Lock());
     const gpu::Viewport& v = d3d::State().viewport;
@@ -93,22 +89,20 @@ void StoreViewport(X86Context&, uint8_t*) {
     WriteFloat(p + 20, v.max_z);
 }
 
-// D3DDevice_GetViewportOffsetAndScale
 X86_EXTERN_FUNC(__imp__sub_0026E9C0);
 X86_FUNC(sub_0026E9C0) {
     StoreViewport(ctx, base);
     __imp__sub_0026E9C0(ctx, base);
 }
 
-// device fields the library's init sets and the game or its inlined library code reads, then the default states
 void AfterCreateDevice(X86Context& ctx, uint8_t* base) {
     if (ctx.eax) return;
     W32(kDevice + XDK_CDevice_VertexShader, SYM(D3D_FvfShader));
     W32(kDevice + XDK_CDevice_AutoDepth, R32(kDevice + XDK_CDevice_Depth));
     WriteFloat(kDevice + XDK_CDevice_BackBufferScale, 1.0f);
     WriteFloat(kDevice + XDK_CDevice_BackBufferScale + 4, 1.0f);
-    W32(kDevice + XDK_CDevice_DisplayFlags, 0x400000 | (app::Widescreen() ? 0x10000 : 0));  // 60 Hz, widescreen
-    W32(kDevice + XDK_CDevice_VBlankEvent, 0x00040000);  // notification event
+    W32(kDevice + XDK_CDevice_DisplayFlags, 0x400000 | (app::Widescreen() ? 0x10000 : 0));
+    W32(kDevice + XDK_CDevice_VBlankEvent, 0x00040000);
     W32(kDevice + XDK_CDevice_VBlankEvent + 4, 1);
     StoreViewport(ctx, base);
     uint32_t ecx = ctx.ecx;
@@ -124,10 +118,8 @@ void AfterCreateDevice(X86Context& ctx, uint8_t* base) {
 
 constexpr uint32_t kFrameCount = 0x2F4368;
 
-// the game speed cheat: the game's steps take this share of the real time
 static float Speed() { return float(std::clamp(game::Opt().game_speed, 25u, 200u)) / 100.0f; }
 
-// seconds the last frame took, the frame time the game was made for at most, at the game speed
 static float FrameTime() {
     using clock = std::chrono::steady_clock;
     static clock::time_point last;
@@ -142,7 +134,6 @@ static float FrameTime() {
     return dt * Speed();
 }
 
-// The game's timers step one fixed frame time a frame: they step the real one, so any frame rate plays at speed
 X86_EXTERN_FUNC(__imp__sub_000BE3F0);
 X86_FUNC(sub_000BE3F0) {
     uint32_t t = ctx.ecx;
@@ -158,11 +149,9 @@ X86_FUNC(sub_000BE3F0) {
     G<float>(t + kTimerTime) = time + float((steps() - before) * dt);
 }
 
-// frame throttle: sleeps that gave the console's one CPU to the loader
 X86_FUNC(sub_001F9130) { Return(ctx, ctx.eax, 1); }
 
-// The Flash menus and HUD tick in milliseconds, 33 a call: the real ones, the part of one carried over
-void WeaponsTick(X86Context& ctx);  // weapons.cpp: the weapons page's requests
+void WeaponsTick(X86Context& ctx);
 void MenuTick(X86Context& ctx, uint8_t*) {
     WeaponsTick(ctx);
     using clock = std::chrono::steady_clock;
@@ -175,18 +164,13 @@ void MenuTick(X86Context& ctx, uint8_t*) {
     carry -= float(ctx.eax);
 }
 
-// what a step made once a frame at 30 becomes over the real frame: factor to the power of this
 static float FrameShare() { return FrameTime() / G<float>(kGameFrameTime); }
 
 static uint32_t Player() { return R32(kWorld) + kWorldPlayer; }
 
-// weapon and its data
 constexpr uint32_t kWeaponData = 0xEC;
 constexpr uint32_t kWeaponOwner = 0xF0;
 constexpr uint32_t kDataAimZoom = 0xB4;
-// player
-// the view's axes: right, up, forward and eye look like the rows of one matrix at 0xD0 (forward and eye are known,
-// right and up are read from the rows before them and checked at run time)
 constexpr uint32_t kPlayerRight = 0xD0;
 constexpr uint32_t kPlayerUp = 0xE0;
 constexpr uint32_t kPlayerForward = 0xF0;
@@ -195,41 +179,39 @@ constexpr uint32_t kPlayerWeapon = 0x29C;
 constexpr uint32_t kPlayerZoom = 0x2A4;
 constexpr uint32_t kPlayerFireRequest = 0x32C;
 
-// The zoom of the aim grows or shrinks by a fixed share a frame
 void ZoomStep(X86Context& ctx, uint8_t*) {
     float old = G<float>(R32(ctx.ecx + kWeaponOwner) + kPlayerZoom);
     float now = ctx.xmm[0].f[0];
     if (now == old || old <= 0) return;
-    bool out = !G<uint8_t>(ctx.ecx + 0x105) && old > 1;  // back towards 1
+    bool out = !G<uint8_t>(ctx.ecx + 0x105) && old > 1;
     ctx.xmm[0].f[0] = out ? 1 + (old - 1) * std::pow((now - 1) / (old - 1), FrameShare())
                           : old * std::pow(now / old, FrameShare());
 }
 
 constexpr float kHalf = 3.14159265f / 360.0f;
 
-// tangent of a setting's half angle over that of the game's 70 degrees
 static float Widen(uint32_t degrees) {
     return std::tan(std::clamp(degrees, 45u, 140u) * kHalf) / std::tan(70 * kHalf);
 }
 
-static float g_gun = 1.0f;  // the gun's picture over the view's
+static float g_gun = 1.0f;
 
-// ---- log (ads_test.log, the run before in ads_test_prev.log): at most 300 lines a run. Only writes, changes nothing ----
 static long DbgMs() {
     static const auto start = std::chrono::steady_clock::now();
     return long(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
 }
+
 static void DbgLog(const char* fmt, ...) {
     static std::mutex lock;
     std::lock_guard<std::mutex> guard(lock);
     const char* path = "/storage/emulated/0/Black/SaveData/ads_test.log";
     static bool first = true;
     static int lines = 0;
-    if (first) {  // every run starts a fresh file; the run before is kept as ads_test_prev.log
+    if (first) {
         first = false;
         std::rename(path, "/storage/emulated/0/Black/SaveData/ads_test_prev.log");
     }
-    if (lines >= 300) return;  // a runaway line cannot fill the storage
+    if (lines >= 300) return;
     lines++;
     FILE* log = std::fopen(path, "a");
     if (!log) return;
@@ -511,21 +493,16 @@ static uint32_t PadBits() {
     return bits;
 }
 
-// ---- fire input helpers (RPG / GRL / BNS M203 spam fire) ----
-
-// primary fire held: left mouse button, or a touch fire button / a pad's right trigger (touch::Firing covers both)
 static bool FireHeld() {
     return input::LeftButton() || touch::Firing();
 }
 
-// alternate fire held: a pad's left trigger (analog 5) or left bumper (analog 7 / button bit 8); the BNS M203
-// under the barrel fires on this, like the grenade throw button of the game's controls
 static bool AltFireHeld() {
     for (int port = 0; port < 4; port++) {
         input::Pad pad = input::Poll(port);
-        if (pad.analog[5] > 30) return true;   // left trigger
-        if (pad.analog[7] > 30) return true;   // left bumper analog
-        if (pad.buttons & 0x0100) return true; // LB button
+        if (pad.analog[5] > 30) return true;
+        if (pad.analog[7] > 30) return true;
+        if (pad.buttons & 0x0100) return true;
     }
     return false;
 }
@@ -719,7 +696,6 @@ static float WholeFrames(float wait, float rest) {
 
 static bool g_idle_early;
 
-// weapon
 constexpr uint32_t kWeaponState = 0xD8;
 constexpr uint32_t kWeaponWait = 0xDC;
 constexpr uint32_t kWeaponAmmo = 0xF4;
@@ -754,11 +730,6 @@ static void RestoreAmmo(uint32_t weapon, const KeptAmmo& kept) {
     if (G<uint16_t>(kept.ammo + kAmmoClip) < kept.clip) G<uint16_t>(kept.ammo + kAmmoClip) = kept.clip;
 }
 
-// diagnosis for NO SPREAD and for a launcher that fires again at once, only writes: weapon_dump.log has each kind of
-// weapon the player holds once, the words of the weapon, of its data and of what their pointers lead to, to tell the
-// weapons apart (a sniper's spread is near nothing, a shotgun's is wide); weapon_trace.log has the first shots, frame
-// by frame, with the weapon's state, wait and rounds (try it with INFINITE AMMO off)
-// the 64 MB of memory is at the bottom of the address space and again from 0x80000000 (the weapon table is there)
 static bool GuestPointer(uint32_t v) { return !(v & 3) && ((v >= 0x10000 && v < 0x04000000) || (v >= 0x80000000 && v < 0x84000000)); }
 
 static void DumpWords(const char* what, uint32_t at, uint32_t bytes) {
@@ -775,14 +746,13 @@ static void DumpWords(const char* what, uint32_t at, uint32_t bytes) {
 }
 
 static void DumpWeapon(uint32_t weapon) {
-    static std::set<uint32_t> done;  // by the weapon's data: each kind once
+    static std::set<uint32_t> done;
     uint32_t data = R32(weapon + kWeaponData);
     if (!GuestPointer(data) || !done.insert(data).second) return;
     const char* name = TableName(data);
     filelog::Write("weapon_dump", "==== %s weapon %08X data %08X", name ? name : "?", weapon, data);
     DumpWords("weapon", weapon, 0x180);
     DumpWords("data", data, kTableStride);
-    // one step into what they point at
     int followed = 0;
     for (uint32_t from : {weapon, data})
         for (uint32_t off = 0; off < (from == weapon ? 0x180u : kTableStride) && followed < 16; off += 4) {
@@ -824,25 +794,25 @@ X86_FUNC(sub_001EEFD0) {
     uint32_t alt_before  = RoundsOf(weapon, kWeaponAltAmmo);
     uint32_t rounds = main_before + alt_before;
 
-    // ---- BEFORE original: keep the fire request alive for RPG / GRL while fire is held (spam fire without zoom) ----
-    // The RPG and GRL are pure launchers: primary fire is the launcher itself. Set kPlayerFireRequest to 1 every frame
-    // the fire button is held, and set the fast-forward request so the fire animation never blocks. This is what makes
-    // the launcher fire continuously without the player releasing and pressing again
+    uint32_t rf  = std::clamp(game::Opt().rapid_fire, 1u, 999u);
+    uint32_t rfe = std::clamp(game::Opt().rapid_fire_extra, 1u, 999u);
+
+    // ---- BEFORE original: keep the fire request alive for RPG / GRL while fire is held, and for the BNS M203
+    // (alt fire) while alt fire is held. This makes the launcher fire continuously without the player releasing and
+    // pressing again, and sets the fast-forward request so the fire animation never blocks
     {
         uint32_t me_pre = R32(weapon + kWeaponOwner);
         uint32_t data_pre = R32(weapon + kWeaponData);
         const char* name_pre = data_pre ? TableName(data_pre) : nullptr;
-        if (me_pre == Player() && game::Opt().rapid_fire_extra && name_pre) {
+        if (me_pre == Player() && rfe > 1 && name_pre) {
             bool pure_launcher = !std::strcmp(name_pre, "RPG") || !std::strcmp(name_pre, "GRL");
             bool bns = !std::strcmp(name_pre, "BNS");
             if (pure_launcher && FireHeld()) {
                 W32(me_pre + kPlayerFireRequest, 1);
                 game::g_launcher_skip_request = true;
-            } else if (bns && (AltFireHeld() || FireHeld())) {
-                // BNS: alt fire (LT/LB) is the M203 launcher, primary is the M16 rifle. When either is held, keep the
-                // fire request alive and the fast-forward going: the M16 fires at RAPID FIRE speed (the fast-forward
-                // is harmless there since the fire clip is short), the M203 fires at RAPID FIRE EXTRA speed (the
-                // fast-forward is what lets it fire without reload animation delay)
+            } else if (bns && AltFireHeld()) {
+                // BNS: only the M203 under the barrel (alt fire) uses RAPID FIRE EXTRA; the M16 rifle above it uses
+                // RAPID FIRE and is not forced here
                 W32(me_pre + kPlayerFireRequest, 1);
                 game::g_launcher_skip_request = true;
             }
@@ -854,18 +824,33 @@ X86_FUNC(sub_001EEFD0) {
     uint32_t main_after = RoundsOf(weapon, kWeaponAmmo);
     uint32_t alt_after  = RoundsOf(weapon, kWeaponAltAmmo);
     bool shot     = (main_after + alt_after) < rounds;
-    bool alt_shot = alt_after < alt_before;  // the launcher under the barrel fired (M203)
+    bool alt_shot = alt_after < alt_before;
     RestoreAmmo(weapon, kept);
     uint32_t me = R32(weapon + kWeaponOwner);
-    // rapid fire cheat: 1 OFF, 2-998 multiplier, 999 INFINITE. RAPID FIRE EXTRA also forces instant for the pure
-    // launchers (RPG / GRL / SNR) whatever the rapid fire level, so it works regardless
-    uint32_t faster = std::clamp(game::Opt().rapid_fire, 1u, 999u);
-    bool instant = faster >= 999;
-    if (!instant && shot && me == Player() && game::Opt().rapid_fire_extra) {
+
+    // RAPID FIRE EXTRA follows its own level for the launchers: RPG and GRL (all their fire), and the M203 of the
+    // BNS (only the launcher under the barrel; the M16 rifle above it uses RAPID FIRE). Its multiplier, or INFINITE
+    // at 999, whatever the RAPID FIRE level is
+    bool extra = false;
+    if (shot && me == Player()) {
         uint32_t data = R32(weapon + kWeaponData);
         const char* name = data ? TableName(data) : nullptr;
-        if (name && (!std::strcmp(name, "RPG") || !std::strcmp(name, "GRL") || !std::strcmp(name, "SNR")))
-            instant = true;
+        if (name) {
+            if (!std::strcmp(name, "RPG") || !std::strcmp(name, "GRL")) {
+                extra = true;
+            } else if (!std::strcmp(name, "BNS") && alt_shot) {
+                extra = true;
+            }
+        }
+    }
+    uint32_t faster = extra ? rfe : rf;
+    bool instant = faster >= 999;
+
+    if (shot && me == Player() && extra && faster > 1) {
+        game::g_launcher_skip_request = true;
+        if (FireHeld() || AltFireHeld()) {
+            W32(me + kPlayerFireRequest, 1);
+        }
     }
     if (shot && me == Player() && wait > 0) {
         if (instant) wait = 0.0001f;
@@ -879,7 +864,7 @@ X86_FUNC(sub_001EEFD0) {
     }
     if (wait == rest) return;
     if (instant && shot && me == Player()) {
-        wait = 0.0001f;  // skip WholeFrames' one-frame floor: no wait at all
+        wait = 0.0001f;
     } else {
         wait = WholeFrames(wait, rest <= 0 && rest > -dt ? rest : -dt);
     }
@@ -973,7 +958,7 @@ X86_FUNC(sub_00097E00) {
     g_fetch_active = false;
 }
 
-// A fire clip that ends before the wait does hands over to the idle early...
+// NOTE: rapid_fire_extra adalah uint32_t sekarang, jadi dua pengecekan di bawah pakai `> 1` (bukan truthy)
 X86_EXTERN_FUNC(__imp__sub_0017B130);
 X86_FUNC(sub_0017B130) {
     uint32_t ac = R32(ctx.esp + 4);
@@ -983,12 +968,7 @@ X86_FUNC(sub_0017B130) {
     int16_t slot = G<int16_t>(clip + kAnimClipFadeSlot);
     uint32_t fade = clip + kAnimClipFades + slot * kFadeSize;
     g_kick_ac = ac;
-    // RAPID FIRE EXTRA: fast-forward the animation clip so the next action can start at once. Two independent tracks:
-    //  - grenade throw (cheats.cpp's sub_001E8830 sets g_grenade_skip_request when the player throws one)
-    //  - launcher fire (sub_001EEFD0 sets g_launcher_skip_request when RPG / GRL / BNS M203 fires, or while held)
-    // Both capture the current non-idle clip (never the idle clip S_001 by mistake) and hold its time (t14 at +0x14)
-    // at its length (+0x1C) so the game sees the animation as done and switches back to idle, allowing the next action
-    if (game::Opt().rapid_fire_extra) {
+    if (game::Opt().rapid_fire_extra > 1) {
         // ---- grenade throw ----
         if (game::g_grenade_skip_request.exchange(false)) {
             std::string name = ReadCString(ac + kAnimName, 13);
@@ -1029,7 +1009,7 @@ X86_FUNC(sub_0017B130) {
         }
     }
     __imp__sub_0017B130(ctx, base);
-    if (game::Opt().rapid_fire_extra) {
+    if (game::Opt().rapid_fire_extra > 1) {
         if (game::g_grenade_skip_frames.load() > 0) {
             uint32_t now_clip = R32(ac + kAnimClip);
             if (now_clip != game::g_grenade_skip_clip.load()) game::g_grenade_skip_frames = 0;
