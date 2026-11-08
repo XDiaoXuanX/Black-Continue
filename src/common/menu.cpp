@@ -293,7 +293,7 @@ void Changed() {
 enum RowId { kRenderResolution, kMaxFps, kVsync, kFpsCounter, kAniso, kReloadBlur, kSkipIntros, kSensitivity,
              kInvertMouse, kWalkSpeed, kFov, kViewmodelFov, kHoldAim, kDrawDistance, kAudioOutput, kLanguage,
              kFmvScale, kGyro, kGyroSensitivity, kTouchLayout, kTouchOpacity, kTouchSize, kTouchEdit,
-             kInfiniteAmmo, kRapidFire, kNoRecoil, kGameSpeed, kGodMode, kOneHitKill, kInfiniteGrenades,
+             kInfiniteAmmo, kRapidFire, kRapidFireExtra, kNoRecoil, kGameSpeed, kGodMode, kOneHitKill, kInfiniteGrenades,
              kCheckUpdates, kTouchSensitivity, kLeftDeadzone, kRightDeadzone, kLeftSensitivity, kRightSensitivity,
              kScreenFilter, kGyroInvertX, kGyroInvertY, kUnlockLevels, kUnlockBlackOps, kTouchSkin, kCredit, kBloom,
              kFog, kAntiAliasing, kHdr, kEsp, kAimbot, kTouchStick, kDynamicRes, kDynamicTarget, kDynamicMin,
@@ -375,6 +375,7 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kInfiniteAmmo, "INFINITE AMMO"},
     {Kind::Value, kInfiniteGrenades, "INFINITE GRENADES"},
     {Kind::Value, kRapidFire, "RAPID FIRE"},
+    {Kind::Value, kRapidFireExtra, "RAPID FIRE EXTRA (RPG, GRL, BNS, GRENADE)"},
     {Kind::Value, kNoRecoil, "NO RECOIL"},
     {Kind::Value, kSteadyAim, "STEADY AIM"},
     {Kind::Value, kAimView, "AIM VIEW"},
@@ -401,6 +402,13 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kHeadHeight, "HEADSHOT HEIGHT"},
     {Kind::Value, kHeadOffset, "HEADSHOT OFFSET"},
     {Kind::Value, kAimAssist, "AIM ASSIST"},
+    {Kind::Heading, -1, "CROSSHAIR"},
+    {Kind::Value, kCrosshair, "CROSSHAIR"},
+    {Kind::Value, kCrosshairMode, "CROSSHAIR MODE"},
+    {Kind::Value, kCrosshairSize, "CROSSHAIR SIZE"},
+    {Kind::Value, kCrosshairRed, "CROSSHAIR RED"},
+    {Kind::Value, kCrosshairGreen, "CROSSHAIR GREEN"},
+    {Kind::Value, kCrosshairBlue, "CROSSHAIR BLUE"},
     {Kind::Heading, -1, "GAME"},
     {Kind::Value, kGameSpeed, "GAME SPEED"},
     {Kind::Value, kUnlockLevels, "UNLOCK ALL MISSIONS"},
@@ -490,6 +498,8 @@ bool* ToggleFlag(Settings& s, int id) {
         case kAimbot: return &o.aimbot;
         case kEspHealth: return &o.esp_health;
         case kDynamicRes: return &o.dynamic_resolution;
+        case kCrosshair: return &o.crosshair;
+        // kRapidFireExtra is a stepped value (StepCheatRow), not a toggle
         default: return nullptr;
     }
 }
@@ -609,6 +619,7 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
             static constexpr uint32_t kRates[] = {1, 2, 3, 4, 6, 8, 10};
             StepTable(kRates, o.rapid_fire, step);
             if (o.rapid_fire <= 1) std::snprintf(text, sizeof(text), "OFF");
+            else if (o.rapid_fire >= 999) std::snprintf(text, sizeof(text), "INFINITE");
             else std::snprintf(text, sizeof(text), "%uX", o.rapid_fire);
             return true;
         }
@@ -682,6 +693,21 @@ bool StepCheatRow(int id, int step, char (&text)[64]) {
             if (step) o.game_speed = uint32_t(StepRange(int(o.game_speed), 25, 200, 25, step));
             std::snprintf(text, sizeof(text), o.game_speed == 100 ? "%u%% (DEFAULT)" : "%u%%", o.game_speed);
             return true;
+        case kCrosshairMode: {
+            // 0 dot (•), 1 cross (+), 2 star (*)
+            static constexpr uint32_t kValues[] = {0, 1, 2};
+            static const char* const kNames[] = {"DOT", "CROSS", "STAR"};
+            std::snprintf(text, sizeof(text), "%s", kNames[StepTable(kValues, o.crosshair_mode, step)]);
+            return true;
+        }
+        case kCrosshairSize:
+            // 50% to 300% in steps of 10
+            if (step) o.crosshair_size = uint32_t(StepRange(int(o.crosshair_size), 50, 300, 10, step));
+            std::snprintf(text, sizeof(text), "%u%%", o.crosshair_size);
+            return true;
+        case kCrosshairRed:   ColorChannel(o.crosshair_color, 0, step, text); return true;
+        case kCrosshairGreen: ColorChannel(o.crosshair_color, 1, step, text); return true;
+        case kCrosshairBlue:  ColorChannel(o.crosshair_color, 2, step, text); return true;
         default:
             return false;
     }
@@ -812,38 +838,38 @@ void StepInputRow(int id, int step, char (&text)[64]) {
             std::snprintf(text, sizeof(text), format, kLanguageNames[i]);
             break;
         }
-           case kAutoUpdate: {
-    // Mendapatkan lingkungan JNI dari SDL / Native Activity
-    JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
-    jobject activity = (jobject)SDL_GetAndroidActivity();
-    if (env && activity) {
-        jclass clazz = env->GetObjectClass(activity);
-        
-        // Membaca status saat ini dari SharedPreferences via Java method
-        jmethodID getMethod = env->GetStaticMethodID(clazz, "isStartupCheckEnabled", "(Landroid/content/Context;)Z");
-        bool auto_check = true;
-        if (getMethod) {
-            auto_check = env->CallStaticBooleanMethod(clazz, getMethod, activity);
-        }
+        case kAutoUpdate: {
+            // Mendapatkan lingkungan JNI dari SDL / Native Activity
+            JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+            jobject activity = (jobject)SDL_GetAndroidActivity();
+            if (env && activity) {
+                jclass clazz = env->GetObjectClass(activity);
 
-        // Jika tombol ditekan (step != 0), ubah statusnya (toggle)
-        if (step) {
-            auto_check = !auto_check;
-            jmethodID setMethod = env->GetStaticMethodID(clazz, "setStartupCheckEnabled", "(Landroid/content/Context;Z)V");
-            if (setMethod) {
-                env->CallStaticVoidMethod(clazz, setMethod, activity, (jboolean)auto_check);
+                // Membaca status saat ini dari SharedPreferences via Java method
+                jmethodID getMethod = env->GetStaticMethodID(clazz, "isStartupCheckEnabled", "(Landroid/content/Context;)Z");
+                bool auto_check = true;
+                if (getMethod) {
+                    auto_check = env->CallStaticBooleanMethod(clazz, getMethod, activity);
+                }
+
+                // Jika tombol ditekan (step != 0), ubah statusnya (toggle)
+                if (step) {
+                    auto_check = !auto_check;
+                    jmethodID setMethod = env->GetStaticMethodID(clazz, "setStartupCheckEnabled", "(Landroid/content/Context;Z)V");
+                    if (setMethod) {
+                        env->CallStaticVoidMethod(clazz, setMethod, activity, (jboolean)auto_check);
+                    }
+                }
+
+                env->DeleteLocalRef(clazz);
+                env->DeleteLocalRef(activity);
+
+                std::snprintf(text, sizeof(text), "%s", OnOff(auto_check));
+            } else {
+                std::snprintf(text, sizeof(text), "OFF");
             }
+            break;
         }
-        
-        env->DeleteLocalRef(clazz);
-        env->DeleteLocalRef(activity);
-        
-        std::snprintf(text, sizeof(text), "%s", OnOff(auto_check));
-    } else {
-        std::snprintf(text, sizeof(text), "OFF");
-    }
-    break;
-      }
     }
 }
 
@@ -882,6 +908,7 @@ void RestoreDefaults(int page) {
         game::Options none;
         o.infinite_ammo = none.infinite_ammo;
         o.rapid_fire = none.rapid_fire;
+        o.rapid_fire_extra = none.rapid_fire_extra;
         o.no_recoil = none.no_recoil;
         o.steady_aim = none.steady_aim;
         o.aim_view = none.aim_view;
@@ -907,6 +934,10 @@ void RestoreDefaults(int page) {
         o.esp_height = none.esp_height;
         o.esp_on_color = none.esp_on_color;
         o.esp_off_color = none.esp_off_color;
+        o.crosshair = none.crosshair;
+        o.crosshair_mode = none.crosshair_mode;
+        o.crosshair_size = none.crosshair_size;
+        o.crosshair_color = none.crosshair_color;
         Changed();
         return;
     }
@@ -929,6 +960,7 @@ void RestoreDefaults(int page) {
     // the cheats page has its own defaults
     o.infinite_ammo = keep.infinite_ammo;
     o.rapid_fire = keep.rapid_fire;
+    o.rapid_fire_extra = keep.rapid_fire_extra;
     o.no_recoil = keep.no_recoil;
     o.steady_aim = keep.steady_aim;
     o.aim_view = keep.aim_view;
@@ -954,6 +986,10 @@ void RestoreDefaults(int page) {
     o.esp_height = keep.esp_height;
     o.esp_on_color = keep.esp_on_color;
     o.esp_off_color = keep.esp_off_color;
+    o.crosshair = keep.crosshair;
+    o.crosshair_mode = keep.crosshair_mode;
+    o.crosshair_size = keep.crosshair_size;
+    o.crosshair_color = keep.crosshair_color;
     Changed();
 }
 

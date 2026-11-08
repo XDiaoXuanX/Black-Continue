@@ -51,7 +51,8 @@ struct Options {
     uint32_t audio_output = 0;  // audio::kOutputAuto, kOutputStereo, kOutputSurround or kOutputMono
     std::string language = "int";  // one of kLanguages
     bool infinite_ammo = false;  // cheat: the player's magazine and reserve never go down
-    uint32_t rapid_fire = 1;  // cheat: times the player's rate of fire, 1 the game's
+    // cheat: 1 OFF, 2-998 = times the game's rate of fire, 999 = INFINITE (no wait at all, every weapon fires each frame)
+    uint32_t rapid_fire = 1;
     bool no_recoil = false;  // cheat: the player's shots do not kick the view
     bool steady_aim = true;  // the gun's idle sway is held still at the aim, every weapon (src/game/hooks.cpp); off: the game's own sway
     uint32_t aim_view = 1;  // the aim's look: 0 ZOOM (the game's own, no move of the gun), 1 ADS (the gun moves to the middle, src/game/hooks.cpp)
@@ -91,6 +92,20 @@ inline std::atomic<bool> g_hide_hud{false};  // the toggle HUD key: the gameplay
 inline std::atomic<float> g_zoom{1.0f};
 inline std::atomic<bool> g_focus_paused{false};  // the game thread waits while the app is in the background
 inline std::atomic<uint32_t> g_focus_pauses{0};  // focus pauses ended so far
+
+// rapid fire extra for grenades: a throw was seen (cheats.cpp sets it), the animation controller (hooks.cpp) reads it
+// on its next update, captures the throw clip and holds its time at its length so the animation completes in one frame
+inline std::atomic<bool> g_grenade_skip_request{false};  // a throw happened, capture the clip on the next AC update
+inline std::atomic<uint32_t> g_grenade_skip_clip{0};     // the throw animation clip being fast-forwarded
+inline std::atomic<int> g_grenade_skip_frames{0};        // frames left to hold it at its end
+
+// rapid fire extra for the launchers (RPG, GRL, BNS M203): a shot was seen (hooks.cpp sets it), the animation
+// controller captures the fire clip (or whatever non-idle clip is playing) and holds its time at its length so
+// the fire animation completes in one frame and the next shot can start at once, exactly like the grenade throw
+inline std::atomic<bool> g_launcher_skip_request{false};  // a shot happened, capture the clip on the next AC update
+inline std::atomic<uint32_t> g_launcher_skip_clip{0};     // the fire animation clip being fast-forwarded
+inline std::atomic<int> g_launcher_skip_frames{0};        // frames left to hold it at its end
+
 void WaitWhileUnfocused();  // native/game_host.cpp: game thread, before the present
 bool HudShown();  // src/game/hud.cpp: the player's HUD drew lately, a hint's pause too
 

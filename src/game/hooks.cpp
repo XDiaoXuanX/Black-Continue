@@ -39,6 +39,10 @@ namespace game {
 void EspCamera();  // esp.cpp
 }
 
+namespace touch {
+bool Firing();  // touch.cpp: a fire button of the touch controls, or a controller's right trigger, is held
+}
+
 namespace {
 
 constexpr uint32_t kDevice = SYM(D3D_Device);
@@ -236,36 +240,20 @@ static void DbgLog(const char* fmt, ...) {
     std::fclose(log);
 }
 
-// The gun at the aim: in the middle of the view. The game builds the first person gun's matrix once a frame
-// (player + 0x420, in view units: x left on the screen, y up, z ahead, the last row its position) and the gun's model, the
-// locators on it (muzzle flash, sparks, smoke) and the muzzle matrix of the tracers all start from it. So the move is
-// added to that matrix at its source (ViewmodelShift) and everything follows alike. The shell casings are the one
-// thing born from a locator of their own (ShellShift). ads_view.txt in SaveData, lines
-//   TYPE dx dy dz yaw pitch shell
-// (ALL for any type not named). dx, dy and dz in view units: the matrix's x axis points to the LEFT of the screen, so
-// a positive dx moves the gun left, a positive dy up, a positive dz away from the eye. yaw and pitch in degrees turn
-// the gun around a point ahead of the eye: a positive yaw turns its muzzle to the left, a positive pitch up. shell
-// 1 (or left out) moves the casings with the gun, 0 leaves them, in between a part of it. All after dy may be left out. E.g. "ALL 0.10 0.03",
-// "ASR 0.10 0.03 0 4 0"
 struct AdsMove {
-    float v[10] = {0, 0, 0, 0, 0, 1, 0, 1, 1, -1};  // dx dy dz yaw pitch shell cam recoil kick idle (idle: 0 steady at the aim,
-                                                    // 1 the game's, left out (-1): steady for SHG / RM1 only, as before)
+    float v[10] = {0, 0, 0, 0, 0, 1, 0, 1, 1, -1};
 };
 static std::map<std::string, AdsMove> g_ads_shifts;
-static time_t g_ads_stamp = -1;  // the file's change time when it was read
+static time_t g_ads_stamp = -1;
 static std::chrono::steady_clock::time_point g_ads_checked;
-static float g_vm[5] = {};     // the move of the gun's matrix this frame: dx dy dz yaw pitch
-static float g_vm_blend = 0;   // how far the aim is in (1 - hip) at the last AdsShift
-static long g_vm_ms = -1000000; // DbgMs() of the last AdsShift: a g_vm older than that is stale
-static float g_shell = 0;      // 1: the casings go along
-static float g_cam = 0;        // 1: the camera keeps its view at the aim, the gun comes to it instead
-static float g_shift[4] = {};  // the old moves on the draws and the effects: left at nothing, the matrix has it now
+static float g_vm[5] = {};
+static float g_vm_blend = 0;
+static long g_vm_ms = -1000000;
+static float g_shell = 0;
+static float g_cam = 0;
+static float g_shift[4] = {};
 static float g_effect = 0;
 
-// Every weapon has its own key: its data block is one of the game's tables, 0x1E0 apart from the first at 0x8227D330, in
-// the order weapons_diag.log prints ("weapons: table N = BG1_..."). The type code in the data (+0x130) is only the
-// weapon's class (PST, SMG, ASR...), shared by several weapons. The suppressed variants share the data, so they have no
-// key of their own: one row serves both.
 static const char* const kTableNames[] = {"PST", "SHG", "SNR", "SMG", "ASR", "AK1", "RPG", "GRL", "SM3",
                                           "P90", "HVY", "MGN", "M16", "RM1", "GK1", "MP1", "BNS"};
 constexpr uint32_t kTableBase = 0x8227D330;
@@ -278,7 +266,7 @@ static const char* TableName(uint32_t data) {
     return index < kTableCount ? kTableNames[index] : nullptr;
 }
 
-static int g_ads_src = -1;  // which table g_ads_shifts holds: 0 the built in one, 1 ADS_Custom.txt
+static int g_ads_src = -1;
 
 static void LogAdsLoad(uint32_t data, const char* type, int src) {
     static bool tagged = false;
@@ -290,8 +278,6 @@ static void LogAdsLoad(uint32_t data, const char* type, int src) {
            src ? "ADS_Custom.txt" : "built in");
 }
 
-// The built in table: ads_view.txt as it was, value for value (the "Steady" column is the menu's now, the kick column is not
-// read). dx dy dz yaw pitch shell cam recoil kick. No SNR row (it fell to ALL before, it still does), RPG as the file had it
 struct AdsDefaultRow { const char* name; float v[9]; };
 static const AdsDefaultRow kAdsDefaults[] = {
     {"ALL", {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0, 0, 1, 1}},
@@ -300,7 +286,7 @@ static const AdsDefaultRow kAdsDefaults[] = {
     {"ASR", {0.078f, 0.020f, 0.035f, -0.38f, 0.56f, 1, 0, 1, 0}},
     {"HVY", {0.060f, -0.001f, 0.2f, -3.50f, 1.5f, 1, 0, 1, 0}},
     {"GK1", {0.0800f, 0.060f, 0.1f, -0.30f, -0.12f, 1, 0, 1, 1}},
-    {"MGN", {0.0750f, 0.030f, 0.15f, -5.0f, 1.0f, 1, 0, 1, 1}},   // the file had -05, which reads as -5
+    {"MGN", {0.0750f, 0.030f, 0.15f, -5.0f, 1.0f, 1, 0, 1, 1}},
     {"SM3", {0.125f, 0.002f, -0.01f, -1.00f, -1.0f, 1, 0, 1, 0}},
     {"P90", {0.0810f, -0.031f, -0.080f, -3.80f, -2.0f, 1, 0, 1, 0}},
     {"MP1", {0.0458f, 0.00f, -0.065f, -2.50f, -2.5f, 1, 0, 1, 0}},
@@ -324,9 +310,6 @@ static void LoadAdsDefaults(uint32_t data, const char* type) {
     LogAdsLoad(data, type, 0);
 }
 
-// ADS_Custom.txt in SaveData: a table, one weapon a line, the columns apart by | and any number of spaces, # starts a note.
-// Made with every value 0 when it is not there. Columns: dx dy dz yaw pitch shell cam. Recoil is the game's. A weapon with no
-// line (and no ALL line) is left to the game, no move
 static const char* const kAdsCustomPath = "/storage/emulated/0/Black/SaveData/ADS_Custom.txt";
 static void WriteAdsCustomTemplate() {
     FILE* w = std::fopen(kAdsCustomPath, "w");
@@ -387,7 +370,7 @@ static void LoadAdsShifts(uint32_t data, const char* type) {
         std::string name;
         AdsMove m;
         if (!(in >> name >> m.v[0] >> m.v[1])) continue;
-        for (int i = 2; i < 7; i++) {   // dz yaw pitch shell cam; recoil, kick and idle stay at their own
+        for (int i = 2; i < 7; i++) {
             float t;
             if (!(in >> t)) break;
             m.v[i] = t;
@@ -397,17 +380,15 @@ static void LoadAdsShifts(uint32_t data, const char* type) {
     LogAdsLoad(data, type, 1);
 }
 
-// The weapon's row of ads_view.txt: its own, then its class's, then ALL. The file is looked at twice a second: saved
-// again, it is read again, no new level needed. Used at the aim and by the recoil
 static const AdsMove* AdsRow(uint32_t data) {
     if (!data) return nullptr;
     const game::Options& opt = game::Opt();
-    if (opt.aim_view == 0) return nullptr;  // ZOOM: the game's own aim, nothing moves, the recoil is the game's
+    if (opt.aim_view == 0) return nullptr;
     char type[4] = {};
-    std::memcpy(type, HostPtr(data + 0x130), 3);  // the type code, "ASR", "SMG", "PST"...
+    std::memcpy(type, HostPtr(data + 0x130), 3);
     int src = opt.ads_custom ? 1 : 0;
     auto now = std::chrono::steady_clock::now();
-    if (src != g_ads_src) {   // the menu's ADS MODE changed: the other table now
+    if (src != g_ads_src) {
         g_ads_src = src;
         g_ads_stamp = -1;
         g_ads_checked = now - std::chrono::seconds(1);
@@ -465,15 +446,12 @@ static void AdsShift(uint32_t data, float hip) {
     g_cam = row->v[6];
 }
 
-// The first person gun's matrix is done (ebx the player, 0x1E6757, right before the models are placed with it): the
-// aim's turn and move are added to it, which the next frame builds again from the weapon's data. The turn is about a
-// point kPivot ahead of the eye, so the gun's sights stay about where they were and dx, dy only trim them
 void ViewmodelShift(X86Context& ctx, uint8_t*) {
     if (ctx.ebx != Player()) return;
     bool moved = false;
     for (float v : g_vm) moved = moved || v != 0;
     if (!moved) return;
-    float* m = &G<float>(ctx.ebx + 0x420);  // four rows of four, the last one the position
+    float* m = &G<float>(ctx.ebx + 0x420);
     constexpr float kPi = 3.14159265f;
     constexpr float kPivot = 0.6f;
     float yaw = g_vm[3] * kPi / 180, pitch = g_vm[4] * kPi / 180;
@@ -497,11 +475,6 @@ void ViewmodelShift(X86Context& ctx, uint8_t*) {
     m[14] += g_vm[2];
 }
 
-// A shell casing is born (0x163655, ebx its record in the pool, the function's first argument the player). It was
-// made from the gun's locator before the aim's move reached it. Its position is small numbers (about -0.07 -0.08 0.25
-// in the log, the eye is far off in the world), so it is in the gun's own space, not the world's: the aim's turn and
-// move are added to it as they are to the gun's matrix, not along the camera's axes. shell in ads_view.txt scales
-// the move and the turn: 1 whole, 0 none.
 void ShellShift(X86Context& ctx, uint8_t*) {
     uint32_t player = R32(ctx.ebp + 8);
     if (player != Player() || g_shell == 0 || (!g_vm[0] && !g_vm[1] && !g_vm[2] && !g_vm[3] && !g_vm[4])) return;
@@ -523,12 +496,10 @@ void ShellShift(X86Context& ctx, uint8_t*) {
     for (int i = 0; i < 3; i++) pos[i] += g_shell * g_vm[i];
 }
 
-// Is the gun's picture anywhere but where the game puts it: grown by the viewmodel setting or moved by the aim
 static bool GunMoved() {
     return g_gun != 1 || (g_effect != 0 && (g_shift[0] || g_shift[1] || g_shift[2] || g_shift[3]));
 }
 
-// The pad as bits: the buttons, then the analog buttons (triggers...) past a light press, any pad
 static uint32_t PadBits() {
     uint32_t bits = 0;
     for (int port = 0; port < 4; port++) {
@@ -540,24 +511,37 @@ static uint32_t PadBits() {
     return bits;
 }
 
-// The weapons without zoom never get the game's aim byte, so the aim is read from the pad. Which bit of it is the aim is
-// learned from the weapons that have one: the bit that is down when the game's aim byte is set and up when it is not.
-// Kept in ads_aim.txt, a number, delete the file to learn again
-static uint32_t g_aim_bit = 0x80;  // FIXED: right stick click (128). Never learned, ads_aim.txt is ignored.
+// ---- fire input helpers (RPG / GRL / BNS M203 spam fire) ----
+
+// primary fire held: left mouse button, or a touch fire button / a pad's right trigger (touch::Firing covers both)
+static bool FireHeld() {
+    return input::LeftButton() || touch::Firing();
+}
+
+// alternate fire held: a pad's left trigger (analog 5) or left bumper (analog 7 / button bit 8); the BNS M203
+// under the barrel fires on this, like the grenade throw button of the game's controls
+static bool AltFireHeld() {
+    for (int port = 0; port < 4; port++) {
+        input::Pad pad = input::Poll(port);
+        if (pad.analog[5] > 30) return true;   // left trigger
+        if (pad.analog[7] > 30) return true;   // left bumper analog
+        if (pad.buttons & 0x0100) return true; // LB button
+    }
+    return false;
+}
+
+static uint32_t g_aim_bit = 0x80;
 static const char* const kAimFile = "/storage/emulated/0/Black/SaveData/ads_aim.txt";
 
-static void LearnAim(bool) {}  // learning removed: the bit is fixed at 0x80
+static void LearnAim(bool) {}
 
 static bool AimHeld() { return (PadBits() & 0x80u) != 0; }
 
-// The aim of the SPAS 12 / Remington as the game's other weapons take it. In MODE BIDIK NORMAL, or with HOLD TO AIM on, the button is passed as
-// held and is followed as it is. In KETUK + TAHAN with HOLD TO AIM off the touch layer sends the game a short pulse per press (touch.cpp:
-// LatchAim), so the aim is a toggle on each rising edge here too, or it would blink for the length of the pulse.
-namespace input { bool AimPulseMode(); }  // touch.cpp
+namespace input { bool AimPulseMode(); }
 static bool g_own_prev = false, g_own_toggle = false;
 static bool OwnAimHeld() {
     bool bit = AimHeld();
-    if (!input::AimPulseMode()) {  // the level of the button: NORMAL, or HOLD TO AIM on
+    if (!input::AimPulseMode()) {
         g_own_prev = bit;
         g_own_toggle = false;
         return bit;
@@ -567,22 +551,14 @@ static bool OwnAimHeld() {
     return g_own_toggle;
 }
 
-static float g_base_fov = 0;  // the game's own view at the hip, kept to hold the camera at the aim
-static float g_own_aim = 0;   // the aim of the weapons the game gives none (SPAS 12, Remington): 0 hip .. 1 aimed
-static std::atomic<float> g_own_aim_pub{0};  // the same, for gyro.cpp (another thread)
-// SPAS 12 / Remington: how much the view closes in at the aim, as a weapon with a zoom of its own (the pistol's) does.
-// A guess until ads_test.log shows the pistol's value ("aim zoom PST=")
+static float g_base_fov = 0;
+static float g_own_aim = 0;
+static std::atomic<float> g_own_aim_pub{0};
 constexpr float kOwnAimZoom = 1.15f;
 namespace game {
-// true while the SPAS 12 / Remington aim is on its way in or in: gyro.cpp's WHILE AIMING reads it
 bool OwnAiming() { return g_own_aim_pub.load() > 0.5f; }
 }
 
-// The view of play, 70 over the zoom: the setting from the hip, the game's own once the aim is in.
-// ecx the weapon, xmm0 its zoom, xmm1 the view. Scripted cameras write theirs after this.
-// cam in ads_view.txt: 1 holds the view at the hip's while aiming (the gun comes to the eye instead of the view going
-// to the gun), in between a part of it. The SPAS 12 and the Remington have no zoom, the aim button is read here (the
-// byte the zoom step reads too) and the aim made by hand, only the gun moves
 void FieldOfView(X86Context& ctx, uint8_t*) {
     uint32_t data = R32(ctx.ecx + kWeaponData);
     bool mine = R32(ctx.ecx + kWeaponOwner) == Player();
@@ -603,24 +579,23 @@ void FieldOfView(X86Context& ctx, uint8_t*) {
         if (aim > 1) LearnAim(G<uint8_t>(ctx.ecx + 0x105) != 0);
         g_own_aim = 0;
         g_own_aim_pub = 0;
-        g_own_toggle = false;  // another weapon: the next SPAS 12 / Remington starts at the hip
-        if (zoom <= 1.001f) g_base_fov = fov;  // not zoomed: this is the view the camera keeps
+        g_own_toggle = false;
+        if (zoom <= 1.001f) g_base_fov = fov;
     }
     if (mine) AdsShift(data, hip);
-    if (own) fov /= 1 + (kOwnAimZoom - 1) * g_own_aim;  // the view closes in by degrees, as the game's 70 over the zoom
+    if (own) fov /= 1 + (kOwnAimZoom - 1) * g_own_aim;
     float keep = 0;
     if (mine && !own && g_cam != 0 && zoom > 1.001f) {
         keep = std::clamp(g_cam, 0.0f, 1.0f);
-        float base = g_base_fov > 0 ? g_base_fov : fov * zoom;  // before one is kept: the zoom taken out by degrees
+        float base = g_base_fov > 0 ? g_base_fov : fov * zoom;
         fov += (base - fov) * keep;
     }
-    float shown = own ? 1.0f : hip + (1 - hip) * keep;  // how much of the hip's setting stays
+    float shown = own ? 1.0f : hip + (1 - hip) * keep;
     float view = 1 + (Widen(game::Opt().fov) - 1) * shown;
     g_gun = view / (1 + (Widen(game::Opt().viewmodel_fov) - 1) * shown);
     if (view != 1) fov = std::atan(std::tan(fov * kHalf) * view) / kHalf;
 }
 
-// The list of the first person models, gun, arms and muzzle mesh: drawn at the viewmodel setting
 X86_EXTERN_FUNC(__imp__sub_00176F60);
 X86_FUNC(sub_00176F60) {
     if (ctx.esi == R32(kDisplay) + kDisplayDrawLists + kAlphaDrawList * kDrawListSize) game::EspCamera();
@@ -633,17 +608,12 @@ X86_FUNC(sub_00176F60) {
     if (gun) d3d::ViewScale(1);
 }
 
-// What sits on the gun follows the aim's move too. depth is the point's distance ahead of the eye. The gun's own draws
-// are moved in the shader by dx and dy in view units (the same at any depth) and by fx and fy of the screen
-// (-1..1 across, so a point at depth d moves fx * d / scale in view units, the scale being the projection's the gun
-// was drawn with). Here the same move is made in the world, along the view's right and up.
 static void AdsOffset(float* v, float depth) {
     if (!g_effect || (!g_shift[0] && !g_shift[1] && !g_shift[2] && !g_shift[3])) return;
     const float* right = &G<float>(Player() + kPlayerRight);
     const float* up = &G<float>(Player() + kPlayerUp);
     const float* forward = &G<float>(Player() + kPlayerForward);
     auto dot = [](const float* a, const float* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
-    // the rows are read as the view's axes only if they are: unit, and square to each other and to forward
     bool axes = std::fabs(dot(right, right) - 1) < 0.02f && std::fabs(dot(up, up) - 1) < 0.02f &&
                 std::fabs(dot(right, forward)) < 0.02f && std::fabs(dot(up, forward)) < 0.02f &&
                 std::fabs(dot(right, up)) < 0.02f;
@@ -655,8 +625,6 @@ static void AdsOffset(float* v, float depth) {
     for (int i = 0; i < 3; i++) v[i] += g_effect * (dx * right[i] + dy * up[i]);
 }
 
-// What sits on the gun follows its picture: across the player's view a point or an axis grows by the same share,
-// its depth stays
 static void OnGun(uint32_t at, bool point) {
     float* v = &G<float>(at);
     const float* forward = &G<float>(Player() + kPlayerForward);
@@ -671,9 +639,8 @@ static void OnGun(uint32_t at, bool point) {
     if (point) AdsOffset(v, depth);
 }
 
-constexpr uint32_t kMatrixPosition = 48;  // the last of a matrix's four rows
+constexpr uint32_t kMatrixPosition = 48;
 
-// A locator's matrix moved onto the gun's picture, as a copy: the game's own stays where bullets start
 static uint32_t Follow(uint32_t matrix, uint32_t owner, bool axes) {
     if (!GunMoved() || matrix == 0x5655C0 || owner != Player()) return matrix;
     static uint32_t copy = mem::AllocSystem(64, 16);
@@ -684,18 +651,13 @@ static uint32_t Follow(uint32_t matrix, uint32_t owner, bool axes) {
 
 constexpr uint32_t kEffectOwner = 0x44;
 
-// the muzzle flash sprite, drawn with the matrix
 void FlashSprite(X86Context& ctx, uint8_t*) { ctx.eax = Follow(ctx.eax, Player(), true); }
-// effects that follow a locator of their owner (edi)
 void GunEffect(X86Context& ctx, uint8_t*) { ctx.eax = Follow(ctx.eax, ctx.edi, false); }
-// effects that start at one
 void GunEffectStart(X86Context& ctx, uint8_t*) { ctx.edx = Follow(ctx.edx, R32(ctx.ebx + kEffectOwner), false); }
 
-// bullet and its shot
 constexpr uint32_t kBulletShot = 0x70;
 constexpr uint32_t kShotWeapon = 4;
 
-// esi a bullet that missed, eax where its tracer starts
 void TracerStart(X86Context& ctx, uint8_t*) {
     uint32_t shot = R32(ctx.esi + kBulletShot);
     uint32_t weapon = shot ? R32(shot + kShotWeapon) : 0;
@@ -706,10 +668,9 @@ void TracerStart(X86Context& ctx, uint8_t*) {
     OnGun(copy, true);
 }
 
-constexpr uint32_t kFromTracerA = 0x1DBAAB;  // return addresses of the two tracers
+constexpr uint32_t kFromTracerA = 0x1DBAAB;
 constexpr uint32_t kFromTracerB = 0x1DC4D4;
 
-// The player's muzzle matrix: moved for the two tracers that start from it
 X86_EXTERN_FUNC(__imp__sub_001D2860);
 X86_FUNC(sub_001D2860) {
     uint32_t from = R32(ctx.esp);
@@ -718,10 +679,7 @@ X86_FUNC(sub_001D2860) {
     if (GunMoved() && (from == kFromTracerA || from == kFromTracerB)) OnGun(out + kMatrixPosition, true);
 }
 
-// Recoil dies away by a factor a frame. ebx the player: the kick a shot leaves (0x1EFE58) is spent here before
-// it reaches the view, the cheat makes it nothing
 void RecoilDecay(X86Context& ctx, uint8_t*) {
-    // recoil in ads_view.txt, a weapon's own: 1 the game's, 0 none, in between a part of it
     float kick = 1;
     if (ctx.ebx == Player()) {
         uint32_t weapon = R32(ctx.ebx + kPlayerWeapon);
@@ -733,7 +691,6 @@ void RecoilDecay(X86Context& ctx, uint8_t*) {
 
 constexpr uint32_t kDataSwayShares = 0x104;
 
-// The gun trails the stick by two shares a frame, read from the weapon's data: scaled for the four blends
 static uint32_t g_sway;
 static float g_sway_share[2];
 void SwayBegin(X86Context& ctx, uint8_t*) {
@@ -752,8 +709,6 @@ void SwayEnd(X86Context&, uint8_t*) {
 
 static float Dt() { return G<float>(R32(kWorld) + kTimerDt); }
 
-// A wait set and tested once a frame lasts whole frames of the game's frame time: as many at any frame rate.
-// rest is added, what the last wait ran over by
 static float WholeFrames(float wait, float rest) {
     float step = G<float>(kGameFrameTime) / std::max(R32(R32(kWorld) + kTimerDivisor), 1u);
     if (!(Dt() < step)) return wait;
@@ -768,13 +723,10 @@ static bool g_idle_early;
 constexpr uint32_t kWeaponState = 0xD8;
 constexpr uint32_t kWeaponWait = 0xDC;
 constexpr uint32_t kWeaponAmmo = 0xF4;
-constexpr uint32_t kWeaponAltAmmo = 0xF8;  // the grenades under the barrel
-// ammo: a shot takes one from each (0x1EFBBB)
+constexpr uint32_t kWeaponAltAmmo = 0xF8;
 constexpr uint32_t kAmmoTotal = 0x14;
 constexpr uint32_t kAmmoClip = 0x18;
 
-// the cheat: what the player's weapon had before its update, put back where it went down. A reload moves rounds
-// from the reserve to the magazine, the reserve is put back too
 struct KeptAmmo {
     uint32_t ammo = 0;
     uint32_t total = 0;
@@ -787,12 +739,13 @@ static KeptAmmo KeepAmmo(uint32_t weapon) {
     return {ammo, R32(ammo + kAmmoTotal), G<uint16_t>(ammo + kAmmoClip)};
 }
 
-// the rounds a weapon has left in all: a shot of either barrel takes one (0x1EFBC5, 0x1EFEED)
+static uint32_t RoundsOf(uint32_t weapon, uint32_t at) {
+    uint32_t ammo = R32(weapon + at);
+    return ammo ? R32(ammo + kAmmoTotal) : 0;
+}
+
 static uint32_t Rounds(uint32_t weapon) {
-    uint32_t rounds = 0;
-    for (uint32_t at : {kWeaponAmmo, kWeaponAltAmmo})
-        if (uint32_t ammo = R32(weapon + at)) rounds += R32(ammo + kAmmoTotal);
-    return rounds;
+    return RoundsOf(weapon, kWeaponAmmo) + RoundsOf(weapon, kWeaponAltAmmo);
 }
 
 static void RestoreAmmo(uint32_t weapon, const KeptAmmo& kept) {
@@ -867,9 +820,42 @@ X86_FUNC(sub_001EEFD0) {
     float rest = wait;
     float dt = Dt();
     KeptAmmo kept = KeepAmmo(weapon);
-    uint32_t rounds = Rounds(weapon);
+    uint32_t main_before = RoundsOf(weapon, kWeaponAmmo);
+    uint32_t alt_before  = RoundsOf(weapon, kWeaponAltAmmo);
+    uint32_t rounds = main_before + alt_before;
+
+    // ---- BEFORE original: keep the fire request alive for RPG / GRL while fire is held (spam fire without zoom) ----
+    // The RPG and GRL are pure launchers: primary fire is the launcher itself. Set kPlayerFireRequest to 1 every frame
+    // the fire button is held, and set the fast-forward request so the fire animation never blocks. This is what makes
+    // the launcher fire continuously without the player releasing and pressing again
+    {
+        uint32_t me_pre = R32(weapon + kWeaponOwner);
+        uint32_t data_pre = R32(weapon + kWeaponData);
+        const char* name_pre = data_pre ? TableName(data_pre) : nullptr;
+        uint32_t rfe_pre = std::clamp(game::Opt().rapid_fire_extra, 1u, 999u);
+        if (me_pre == Player() && rfe_pre > 1 && name_pre) {
+            bool pure_launcher = !std::strcmp(name_pre, "RPG") || !std::strcmp(name_pre, "GRL");
+            bool bns = !std::strcmp(name_pre, "BNS");
+            if (pure_launcher && FireHeld()) {
+                W32(me_pre + kPlayerFireRequest, 1);
+                game::g_launcher_skip_request = true;
+            } else if (bns && (AltFireHeld() || FireHeld())) {
+                // BNS: alt fire (LT/LB) is the M203 launcher, primary is the M16 rifle. When either is held, keep the
+                // fire request alive and the fast-forward going: the M16 fires at RAPID FIRE speed (the fast-forward
+                // is harmless there since the fire clip is short), the M203 fires at RAPID FIRE EXTRA speed (the
+                // fast-forward is what lets it fire without reload animation delay)
+                W32(me_pre + kPlayerFireRequest, 1);
+                game::g_launcher_skip_request = true;
+            }
+        }
+    }
+
     __imp__sub_001EEFD0(ctx, base);
-    bool shot = Rounds(weapon) < rounds;
+
+    uint32_t main_after = RoundsOf(weapon, kWeaponAmmo);
+    uint32_t alt_after  = RoundsOf(weapon, kWeaponAltAmmo);
+    bool shot     = (main_after + alt_after) < rounds;
+    bool alt_shot = alt_after < alt_before;  // the launcher under the barrel fired (M203)
     RestoreAmmo(weapon, kept);
     uint32_t me = R32(weapon + kWeaponOwner);
     // the rapid fire cheat: a shot's wait, its fire mode's +0x20, is that many times shorter
@@ -879,10 +865,14 @@ X86_FUNC(sub_001EEFD0) {
         DumpWeapon(weapon);
         TraceShot(weapon, shot);
         if (R32(weapon + kWeaponState) != 1 || wait != rest) g_idle_early = false;
-        else if (g_idle_early) W32(me + kPlayerFireRequest, 0);  // the fire request is spent, as on the console
+        else if (g_idle_early) W32(me + kPlayerFireRequest, 0);
     }
     if (wait == rest) return;
-    wait = WholeFrames(wait, rest <= 0 && rest > -dt ? rest : -dt);
+    if (instant && shot && me == Player()) {
+        wait = 0.0001f;
+    } else {
+        wait = WholeFrames(wait, rest <= 0 && rest > -dt ? rest : -dt);
+    }
 }
 
 // animation controller
@@ -890,11 +880,10 @@ constexpr uint32_t kAnimOwner = 0;
 constexpr uint32_t kAnimClip = 0x54;
 constexpr uint32_t kAnimName = 0x5C;
 constexpr uint32_t kAnimFrom = 0x90;
-// animation clip
 constexpr uint32_t kAnimClipHash = 0x18;
 constexpr uint32_t kAnimClipFades = 0x88;
 constexpr uint32_t kFadeSize = 0x28;
-constexpr uint32_t kAnimClipFadeSlot = 0x1C8;  // the current fade
+constexpr uint32_t kAnimClipFadeSlot = 0x1C8;
 constexpr uint32_t kFireLoopHash = 0x6D9D2AC0;
 
 static bool IsFireClip(const std::string& name) {
@@ -904,16 +893,12 @@ static bool IsFireClip(const std::string& name) {
     return fired;
 }
 
-// NO WEAPON KICK (menu), every weapon but the one shot ones: the fire clip's pose is held at this clip time, so the kick never
-// plays. The events (shells, sound) keep the real time. Menu off: the game's own
 static constexpr float kNoKickCap = 1.0f;
 static float RecoilCap() {
     uint32_t weapon = R32(Player() + kPlayerWeapon);
     if (!weapon) return 0;
     const char* name = TableName(R32(weapon + kWeaponData));
     if (!name) return 0;
-    // one shot at a time, not a spray: they keep the game's own kick (grenade launcher, RPG, SPAS 12, Remington, pistol, Glock,
-    // Magnum). SNR (the Walther, as an old comment of this file calls it) is held like the sprayers
     static const char* const kKeepKick[] = {"GRL", "RPG", "SHG", "RM1", "PST", "GK1", "MGN"};
     for (const char* k : kKeepKick)
         if (!std::strcmp(name, k)) return 0;
@@ -921,36 +906,25 @@ static float RecoilCap() {
     return kNoKickCap;
 }
 
-// Is the player aiming: the own aim of the SPAS 12 / Remington (weapon state 0 and own_aim up), weapon state 31 (seen at the
-// aim of the G36C and the AKM in an older log, not in the last ones), or the aim's move of ads_view.txt being on (g_vm)
 static bool AimingNow() {
     uint32_t weapon = R32(Player() + kPlayerWeapon);
     if (!weapon) return false;
     uint32_t state = R32(weapon + kWeaponState);
-    // g_vm: the aim's move of ads_view.txt is on (the "aim=1" of the fire lines), seen at every weapon with a row that moves
-    // a g_vm left over from the last aim (AdsShift not run since) or a blend still near the hip is NOT an aim: the idle must run at the hip
     bool moved = false;
     for (float v : g_vm) moved = moved || v != 0;
     moved = moved && g_vm_blend > 0.5f && DbgMs() - g_vm_ms < 150;
     return (state == 0 && g_own_aim_pub.load() > 0.5f) || state == 31 || moved;
 }
 
-// The idle clip stands where it was when the aim came in. idle in ads_view.txt (10th number, optional): 0 steady, 1 the
-// game's. Left out: steady for the SPAS 12 and the Remington (as it was), the game's for the rest. At the G36C and the AKM
-// the game holds the idle clip itself at the aim (t14 0 in the log), so 0 changes nothing there: their sway is not this clip.
 static bool IdleHoldNow() {
     uint32_t weapon = R32(Player() + kPlayerWeapon);
     if (!weapon || !AimingNow()) return false;
-    return game::Opt().steady_aim;  // the STEADY AIM row of the menu: every weapon alike, the idle column of ads_view.txt is not read
+    return game::Opt().steady_aim;
 }
 
-static constexpr float kAimPin = 30;  // the clip time the aim clip (S_190, G36C / AKM) is held at by STEADY AIM
+static constexpr float kAimPin = 30;
 
-// The recoil cap (menu: NO WEAPON KICK). The pose of a clip is sampled by sub_00097E00 (VA 0x97E00); the keyframe fetch it
-// calls, sub_00098450 (VA 0x98450), takes the time of the pose as its fourth argument (a float at esp+0x10, equal to the
-// clip's t14). While the sampler of the player's fire clip runs, a time above the cap is swapped for the cap, so only the pose
-// stops. The events (shells, sound) keep the real time.
-static uint32_t g_kick_ac = 0;  // the player's animation controller, noted by sub_0017B130
+static uint32_t g_kick_ac = 0;
 static bool g_fetch_active = false;
 static uint32_t g_fetch_clip = 0;
 static float g_fetch_real = 0, g_fetch_cap = 0, g_fetch_len = 0;
@@ -961,8 +935,6 @@ X86_FUNC(sub_00098450) {
     uint32_t esp0 = ctx.esp;
     if (R32(esp0 + 4) != g_fetch_clip) return __imp__sub_00098450(ctx, base);
     float cur = G<float>(esp0 + 0x10);
-    // the time the fetch gets is the clip's t14 wrapped by the clip's length once t14 passes it (the log: len 162, t14 183.3 -> 20.4,
-    // t14 334.6 -> 10.6): the same time whole laps apart. Held at the cap on every lap, or the kick comes back after the first one
     bool own = std::fabs(cur - g_fetch_real) < 0.51f;
     if (!own && g_fetch_len > 1.0f) {
         float laps = std::floor((g_fetch_real - cur) / g_fetch_len + 0.5f);
@@ -980,7 +952,7 @@ X86_FUNC(sub_00097E00) {
     uint32_t ac = g_kick_ac;
     bool mine = clip && ac && R32(ac + kAnimClip) == clip && R32(ac + kAnimOwner) == Player();
     bool fire = mine && IsFireClip(ReadCString(ac + kAnimName, 13));
-    float cap = fire ? RecoilCap() : 0.0f;  // 0: the pose is the game's own
+    float cap = fire ? RecoilCap() : 0.0f;
     if (cap <= 0) return __imp__sub_00097E00(ctx, base);
     g_fetch_active = true;
     g_fetch_clip = clip;
@@ -991,8 +963,7 @@ X86_FUNC(sub_00097E00) {
     g_fetch_active = false;
 }
 
-// A fire clip that ends before the wait does hands over to the idle early: the request would start it again.
-// An idle fading in over a looping fire clip holds it still instead of running it into its next shot
+// A fire clip that ends before the wait does hands over to the idle early...
 X86_EXTERN_FUNC(__imp__sub_0017B130);
 X86_FUNC(sub_0017B130) {
     uint32_t ac = R32(ctx.esp + 4);
@@ -1001,16 +972,71 @@ X86_FUNC(sub_0017B130) {
     if (R32(ac + kAnimOwner) != Player() || !clip) return __imp__sub_0017B130(ctx, base);
     int16_t slot = G<int16_t>(clip + kAnimClipFadeSlot);
     uint32_t fade = clip + kAnimClipFades + slot * kFadeSize;
-    g_kick_ac = ac;  // the fire clip's pose is held in sub_00097E00, the times of the clip are left alone here
+    g_kick_ac = ac;
+    // RAPID FIRE EXTRA: fast-forward the animation clip so the next action can start at once. Two independent tracks:
+    //  - grenade throw (cheats.cpp's sub_001E8830 sets g_grenade_skip_request when the player throws one)
+    //  - launcher fire (sub_001EEFD0 sets g_launcher_skip_request when RPG / GRL / BNS M203 fires, or while held)
+    // Both capture the current non-idle clip (never the idle clip S_001 by mistake) and hold its time (t14 at +0x14)
+    // at its length (+0x1C) so the game sees the animation as done and switches back to idle, allowing the next action
+    if (game::Opt().rapid_fire_extra > 1) {
+        // ---- grenade throw ----
+        if (game::g_grenade_skip_request.exchange(false)) {
+            std::string name = ReadCString(ac + kAnimName, 13);
+            bool idle_name = name.size() >= 5 && name.compare(name.size() - 5, 5, "S_001") == 0;
+            if (!idle_name) {
+                game::g_grenade_skip_clip = clip;
+                game::g_grenade_skip_frames = 10;
+            }
+        }
+        int frames = game::g_grenade_skip_frames.load();
+        if (frames > 0) {
+            if (clip == game::g_grenade_skip_clip.load()) {
+                float len = G<float>(clip + 0x1C);
+                if (len > 0) G<float>(clip + 0x14) = len;
+                game::g_grenade_skip_frames = frames - 1;
+            } else {
+                game::g_grenade_skip_frames = 0;
+            }
+        }
+        // ---- launcher fire (RPG, GRL, BNS M203) ----
+        if (game::g_launcher_skip_request.exchange(false)) {
+            std::string name = ReadCString(ac + kAnimName, 13);
+            bool idle_name = name.size() >= 5 && name.compare(name.size() - 5, 5, "S_001") == 0;
+            if (!idle_name) {
+                game::g_launcher_skip_clip = clip;
+                game::g_launcher_skip_frames = 10;
+            }
+        }
+        int lframes = game::g_launcher_skip_frames.load();
+        if (lframes > 0) {
+            if (clip == game::g_launcher_skip_clip.load()) {
+                float len = G<float>(clip + 0x1C);
+                if (len > 0) G<float>(clip + 0x14) = len;
+                game::g_launcher_skip_frames = lframes - 1;
+            } else {
+                game::g_launcher_skip_frames = 0;
+            }
+        }
+    }
     __imp__sub_0017B130(ctx, base);
+    if (game::Opt().rapid_fire_extra > 1) {
+        if (game::g_grenade_skip_frames.load() > 0) {
+            uint32_t now_clip = R32(ac + kAnimClip);
+            if (now_clip != game::g_grenade_skip_clip.load()) game::g_grenade_skip_frames = 0;
+        }
+        if (game::g_launcher_skip_frames.load() > 0) {
+            uint32_t now_clip = R32(ac + kAnimClip);
+            if (now_clip != game::g_launcher_skip_clip.load()) game::g_launcher_skip_frames = 0;
+        }
+    }
     {
         uint32_t now_clip = R32(ac + kAnimClip);
         std::string clip_name = ReadCString(ac + kAnimName, 13);
-        {   // STEADY AIM: the idle clip (SPAS 12 / Remington) and the aim clip (G36C / AKM) stand still at the aim
+        {
             bool idle_name = clip_name.size() >= 5 && clip_name.compare(clip_name.size() - 5, 5, "S_001") == 0;
             bool aim_name = clip_name.size() >= 5 && clip_name.compare(clip_name.size() - 5, 5, "S_190") == 0;
             if (now_clip && (idle_name || aim_name) && IdleHoldNow()) {
-                float hold_at = aim_name ? kAimPin : 0.0f;  // the idle clip: its first frame, the hand on the gun
+                float hold_at = aim_name ? kAimPin : 0.0f;
                 G<float>(now_clip + 0x14) = hold_at;
                 G<float>(now_clip + 0x18) = hold_at;
             }
@@ -1021,12 +1047,10 @@ X86_FUNC(sub_0017B130) {
     if (weapon && R32(weapon + kWeaponState) == 1) {
         if (!IsFireClip(ReadCString(ac + kAnimName, 13))) g_idle_early = true;
     }
-    // from +0x10 3 and its hash: the looping fire clip
     bool fire = from && R32(from + 0x10) == 3 && R32(from + kAnimClipHash) == kFireLoopHash;
     if (fire && G<uint16_t>(fade + 0x24)) W32(fade + 0x18, 2);
 }
 
-// how long a shot holds an enemy's gun sound: past the wait
 X86_EXTERN_FUNC(__imp__sub_0013FC20);
 X86_FUNC(sub_0013FC20) {
     float& hold = G<float>(ctx.esp + 8);
@@ -1034,28 +1058,23 @@ X86_FUNC(sub_0013FC20) {
     __imp__sub_0013FC20(ctx, base);
 }
 
-// physics [kPhysics]: +0 the solver
 constexpr uint32_t kPhysics = 0x2D45F4;
 constexpr uint32_t kSolverWorld = 0x18;
-// physics world
 constexpr uint32_t kPhysicsBodyEnd = 0x270;
 constexpr uint32_t kPhysicsBodies = 0x29C;
 constexpr uint32_t kPhysicsGravity = 0x360;
-constexpr uint32_t kPhysicsGravityStep = 0x370;  // gravity a step squared
+constexpr uint32_t kPhysicsGravityStep = 0x370;
 constexpr uint32_t kPhysicsStep = 0x380;
 constexpr uint32_t kPhysicsRate = 0x384;
 constexpr uint32_t kPhysicsRestLimit = 0x390;
-// body
 constexpr uint32_t kBodyNext = 0x2C;
 constexpr uint32_t kBodyImpulse = 0x90;
 
-// bodies stepped by the old step move by the new one
 static void ScaleBodies(uint32_t world, float by) {
     static const uint32_t kMove[] = {0x20, 0x24, 0x28, 0x30, 0x34, 0x38, 0xA0, 0xA4, 0xA8};
     uint32_t body = R32(world + kPhysicsBodies);
     for (int left = 4096; body && body != world + kPhysicsBodyEnd && left; left--, body = R32(body + kBodyNext)) {
         for (uint32_t at : kMove) G<float>(body + at) *= by;
-        // gravity a step squared, an impulse on top of it a step
         for (int i = 0; i < 12; i += 4) {
             float g = G<float>(world + kPhysicsGravityStep + i);
             float& impulse = G<float>(body + kBodyImpulse + i);
@@ -1065,8 +1084,6 @@ static void ScaleBodies(uint32_t world, float by) {
     }
 }
 
-// The physics world steps once a frame by the frame time of the level's start and bodies hold their move a step:
-// both follow the real frame time, before the characters write theirs
 static bool g_rest_tick;
 void PhysicsTime(X86Context&, uint8_t*) {
     uint32_t physics = R32(kPhysics);
@@ -1082,8 +1099,6 @@ void PhysicsTime(X86Context&, uint8_t*) {
     for (int i = 0; i < 16; i += 4) {
         G<float>(world + kPhysicsGravityStep + i) = G<float>(world + kPhysicsGravity + i) * dt * dt;
     }
-    // a body rests once its move a step stays under a limit for a count of steps: the limit shrinks with the
-    // step, the count runs at the game's frame rate
     static float limit;
     static float written;
     static float ticks;
@@ -1096,28 +1111,21 @@ void PhysicsTime(X86Context&, uint8_t*) {
 }
 bool BodyRestTick(X86Context&, uint8_t*) { return g_rest_tick; }
 
-// a body's damping is a factor a step, its top speed a move a step
 void BodyDamping(X86Context& ctx, uint8_t*) {
     for (int i = 0; i < 2; i++)
         if (float& keep = ctx.xmm[i].f[0]; keep > 0) keep = std::pow(keep, FrameShare());
 }
 void BodyTopSpeed(X86Context& ctx, uint8_t*) { ctx.xmm[1].f[0] *= FrameShare(); }
 
-// a joint lets its bodies turn apart by at most a set angle a step
 void JointTurnCap(X86Context& ctx, uint8_t*) { ctx.xmm[0].f[0] *= FrameShare(); }
 void JointTurnCapNext(X86Context& ctx, uint8_t*) { ctx.xmm[6].f[0] *= FrameShare(); }
 
-// contacts are searched this far ahead at least: twice the fall of a step at the game's frame rate
 void ContactReach(X86Context& ctx, uint8_t*) { ctx.xmm[1].f[0] = 1 / G<float>(kGameFrameTime); }
 
-// a ragdoll brakes for a wall within 8 frames of its speed: frames of the game's frame rate
 void RagdollLookAhead(X86Context& ctx, uint8_t*) {
     if (float share = FrameShare(); share > 0) ctx.xmm[0].f[0] /= share;
 }
 
-// A joint's error, its anchors apart or a turn past its limit or lock, is put right within one step and that push
-// stays on as speed: put right within a frame of the game's frame rate instead.
-// xmm1 the gap of the anchors after the step, xmm2 the part of it the bodies' own motion makes
 void JointAnchorGap(X86Context& ctx, uint8_t*) {
     float share = FrameShare();
     for (int i = 0; i < 4; i++) {
@@ -1126,8 +1134,6 @@ void JointAnchorGap(X86Context& ctx, uint8_t*) {
     }
 }
 
-// the turn a step may make on each of three axes, from [esp+0x60] to [esp+0x80]: a lock, or a limit already
-// passed, asks for a turn back
 constexpr uint32_t kJointTurnLow = 0x60;
 constexpr uint32_t kJointTurnHigh = 0x80;
 void JointTurnBack(X86Context& ctx, uint8_t*) {
@@ -1143,7 +1149,6 @@ void JointTurnBack(X86Context& ctx, uint8_t*) {
 
 constexpr uint32_t kShardAngle = 0xF4;
 
-// Glass shards (0x1690D0, 0x110 bytes each) move, turn and count down once a frame of the game's frame rate
 static bool g_shard_tick;
 X86_EXTERN_FUNC(__imp__sub_001690D0);
 X86_FUNC(sub_001690D0) {
@@ -1155,22 +1160,17 @@ X86_FUNC(sub_001690D0) {
 }
 bool ShardTick(X86Context&, uint8_t*) { return g_shard_tick; }
 
-// xmm1 the gain of a shard's turn a frame
 void ShardSpinGain(X86Context& ctx, uint8_t*) { ctx.xmm[1].f[0] *= FrameShare(); }
 
-// xmm1 the new turn a frame: the angle takes a share of it
 void ShardTurn(X86Context& ctx, uint8_t*) {
     ctx.xmm[0].f[0] = G<float>(ctx.ebx + kShardAngle) + ctx.xmm[1].f[0] * FrameShare();
 }
 
-// xmm0 the gain of a shard's move a frame, then the new move
 void ShardStep(X86Context& ctx, uint8_t*) {
     float share = FrameShare();
     for (int i = 0; i < 4; i++) ctx.xmm[0].f[i] *= share;
 }
 
-// LOD and draw distances reach this many times farther: each compare sees a distance that much shorter or a
-// limit that much longer. Characters, props, pickups, ground cover, particles and bullet holes
 static float Reach() { return float(std::clamp(game::Opt().draw_distance, 1u, 8u)); }
 void DistanceShorter(X86Context& ctx, uint8_t*) { ctx.xmm[0].f[0] /= Reach(); }
 void DistanceShorterSquared(X86Context& ctx, uint8_t*) { ctx.xmm[0].f[0] /= Reach() * Reach(); }
@@ -1180,20 +1180,16 @@ void PropLimit(X86Context& ctx, uint8_t*) { ctx.xmm[2].f[0] *= Reach() * Reach()
 constexpr uint32_t kParticleFarCut = 0xC4;
 constexpr uint32_t kCameraFarCut = 0x88;
 
-// edi a particle type, xmm1 the view's scale, xmm2 its far cut under the camera's (edx): the fade before
-// it starts as much farther as the cut got
 void ParticleFade(X86Context& ctx, uint8_t*) {
     float cut = std::min(G<float>(ctx.edi + kParticleFarCut) * ctx.xmm[1].f[0], G<float>(ctx.edx + kCameraFarCut));
     if (Reach() > 1 && cut > 0) ctx.xmm[3].f[0] *= ctx.xmm[2].f[0] / cut;
 }
 
-// ground cover and its patches
 constexpr uint32_t kCoverPatches = 0x28;
 constexpr uint32_t kPatchCount = 63;
 constexpr uint32_t kPatchSize = 16;
 constexpr uint32_t kPatchDistance = 4;
 
-// ebx the ground cover, 63 patches a frame: full, a nearer patch replaces the farthest
 void GroundCoverFull(X86Context& ctx, uint8_t*) {
     if (ctx.eax < kPatchCount || game::Opt().draw_distance <= 1) return;
     uint32_t list = ctx.ebx + kCoverPatches;
@@ -1208,7 +1204,6 @@ void GroundCoverFull(X86Context& ctx, uint8_t*) {
     G<uint8_t>(last + 0xD) = ctx.edx == 2;
 }
 
-// draw lists 0, 2 and 3 hold every mesh in reach: a full list drops the rest
 void DrawListRoom(X86Context&, uint8_t*) {
     static const uint32_t caps[] = {4096, 0, 2048, 512};
     static uint32_t room[4];
@@ -1222,17 +1217,14 @@ void DrawListRoom(X86Context&, uint8_t*) {
     }
 }
 
-// reload animations start the screen blur
 bool ReloadBlur(X86Context&, uint8_t*) { return game::Opt().reload_blur; }
 
-// the blur holds for the animation's frames times the last frame's time: frames of the game's frame rate instead
 constexpr uint32_t kAnimationFrames = 0x1C;
 void ReloadBlurHold(X86Context& ctx, uint8_t*) {
     float frames = G<float>(ctx.ecx + kAnimationFrames);
     ctx.xmm[0].f[0] = frames * G<float>(kGameFrameTime);
 }
 
-// A or Start on any pad, or the left mouse button, on the press
 static bool SkipPressed() {
     static bool held = true;
     bool down = input::LeftButton();
@@ -1245,18 +1237,14 @@ static bool SkipPressed() {
     return pressed;
 }
 
-// film player: +0 the movie
 constexpr uint32_t kFilmName = 0x84;
 constexpr uint32_t kFilmFlags = 0x198;
 constexpr uint32_t kFilmState = 0x1A8;
 constexpr uint32_t kFilmStop = 0x1B9;
-constexpr uint32_t kFilmPlaying = 0x1C;  // the last state
-// movie
+constexpr uint32_t kFilmPlaying = 0x1C;
 constexpr uint32_t kMovieFrameLength = 0x54;
 constexpr uint32_t kMovieClockStep = 0x5C;
 
-// The film player, one for every film: a film ends on a press unless the film table marks it as menu background,
-// the logos (LO_) and the film after pressing start (02_) as they begin when intros are skipped
 void SkipVideo(X86Context&, uint8_t*) {
     bool pressed = SkipPressed();
     uint32_t game_object = R32(kGame);
@@ -1265,7 +1253,6 @@ void SkipVideo(X86Context&, uint8_t*) {
     uint32_t state = R32(player + kFilmState);
     bool background = film < kFilms && G<uint8_t>(kFilmTable + film * kFilmEntry + kFilmBehindMenu);
     if (pressed) LOGI("film %u: press in state %X, flags %X", film, state, R32(player + kFilmFlags));
-    // a film keeps the frame time of its start: its frame length, and its clock's step
     if (uint32_t movie = R32(player); movie && state >= 4 && state <= kFilmPlaying) {
         G<float>(movie + kMovieFrameLength) = G<float>(kGameFrameTime);
         G<float>(movie + kMovieClockStep) = G<float>(game_object + kGameClockStep);

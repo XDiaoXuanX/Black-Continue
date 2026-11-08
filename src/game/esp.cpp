@@ -63,6 +63,10 @@ constexpr float kAssistPull[] = {0.0f, 0.03f, 0.06f, 0.10f};  // of the turn to 
 constexpr float kDegrees = 180.0f / 3.14159265f;
 constexpr auto kFireHold = std::chrono::milliseconds(150);  // a fire request counts this long after it was seen
 
+// the crosshair: the arm's length and the line thickness, in lines of a 480 frame
+constexpr float kCrossBaseSize = 6.0f;
+constexpr float kCrossThickness = 1.5f;
+
 // an enemy is drawn while its update ran this recently: none once the game pauses, no flicker between ticks
 constexpr auto kSeen = std::chrono::milliseconds(250);
 constexpr size_t kMaxEnemies = 64;
@@ -89,7 +93,8 @@ struct Vertex {
     float x, y;
 };
 constexpr size_t kSegments = 8;  // the line, the box's four sides, the bar's back and front; a marker takes two triangles
-constexpr size_t kMaxVertices = kMaxEnemies * kSegments * 6;
+// the ESP + room for the crosshair (dot: 2 triangles, cross: 4 quads, star: 6 quads + 2-triangle dot = 6*6+6 = 42)
+constexpr size_t kMaxVertices = kMaxEnemies * kSegments * 6 + 64;
 
 float Height() { return float(std::clamp(game::Opt().esp_height, 100u, 250u)) / 100.0f; }
 
@@ -329,7 +334,9 @@ void EspOverlay() {
     }
 }
 
-// D3DVIEWPORT8: x, y, width, height. Called between the 2D layer's begin and end
+// D3DVIEWPORT8: x, y, width, height. Called between the 2D layer's begin and end.
+// Draws the ESP (if on) and/or the crosshair (if on) as untextured triangles in the game's own 2D layer.
+// The ESP is drawn first, the crosshair on top of it.
 void DrawEsp(X86Context& ctx, float unit) {
     float on[4], off[4];
     Unpack(Opt().esp_on_color, on);
@@ -338,17 +345,19 @@ void DrawEsp(X86Context& ctx, float unit) {
         Publish(nullptr, 0, on);
         return;
     }
+
     const uint32_t me = R32(kWorld) + kWorldPlayer;
     const float* mine = &G<float>(me + kCharPosition);
     uint32_t viewport = SYM(D3D_Device) + XDK_CDevice_Viewport;
     float vx = float(R32(viewport)), vy = float(R32(viewport + 4));
     float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
-    static const uint32_t buffer = mem::AllocSystem(kMaxVertices * sizeof(Vertex), 16);
-    static const uint32_t offset = mem::AllocSystem(8, 16);
+    static const uint32_t buffer  = mem::AllocSystem(kMaxVertices * sizeof(Vertex), 16);
+    static const uint32_t offset  = mem::AllocSystem(8, 16);
     static const uint32_t colours = mem::AllocSystem(kMaxVertices * 16, 16);
     Vertex* first = static_cast<Vertex*>(HostPtr(buffer));
     float(*colour)[4] = static_cast<float(*)[4]>(HostPtr(colours));
     Vertex* v = first;
+
     // a segment with a colour for each of its points
     auto add = [&](float x0, float y0, float x1, float y1, float width, const float rgba[4]) {
         size_t before = size_t(v - first);
@@ -436,8 +445,7 @@ void DrawEsp(X86Context& ctx, float unit) {
             if (frac > 0) add(left, y, left + (right - left) * frac, y, bar, fill);
         }
     }
-    g_count = kept;
-    Publish(labels, labelled, on);
+
     if (v == first) return;
     W32(offset, 0);
     W32(offset + 4, 0);
