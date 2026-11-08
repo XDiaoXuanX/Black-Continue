@@ -1,10 +1,10 @@
-// The cheats page's ESP LINES: each living enemy gets a box round it, a health bar over it and a line to it from the
-// bottom of the screen, drawn over the finished frame with the view the scene was drawn with. An enemy out of the
-// view is one arrowhead on a ring round the middle of the screen, in a colour of its own. ESP LABEL: a plate over each
-// enemy in view with its health and its distance, drawn by ImGui (EspOverlay). AUTO HEADSHOT: while the player aims in
-// the view turns to the head of the living enemy nearest the crosshair. AIM ASSIST: a small pull of the view to the
-// body of an enemy near the crosshair while the player fires. CROSSHAIR: a marker at the middle of the view (dot,
-// cross or star), its own colour and size, drawn in the same 2D pass
+// The cheats page's ESP, each part its own row: ESP STYLE, a box round each living enemy in view and a line to it from
+// the bottom of the screen; ESP HEALTH BARS, a bar over it; ESP ARROWS, an enemy out of the view as one arrowhead on a
+// ring round the middle of the screen, in a colour of its own; ESP LABEL, a plate with its health and its distance,
+// drawn by ImGui (EspOverlay), always or for a few seconds after the enemy was hit. All of it is drawn over the finished
+// frame with the view the scene was drawn with, and none of it with every row off. AUTO HEADSHOT: while the player aims
+// in the view turns to the head of the living enemy nearest the crosshair. AIM ASSIST: a small pull of the view to the
+// body of an enemy near the crosshair while the player fires
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -15,7 +15,7 @@
 
 #include "common/aspect.h"
 #include "common/options.h"
-#include "core/log.h"
+#include "common/filelog.h"
 #include "game/layout.h"
 #include "xdk/hle.h"
 #include "xdk/layout.h"
@@ -53,7 +53,9 @@ constexpr float kBarThickness = 2.2f;
 constexpr float kBarGap = 2.5f;      // lines of a 480 frame, between the box and its bar
 constexpr float kArrow = 9.0f;       // the direction marker's length, lines of a 480 frame
 constexpr float kRing = 0.30f;       // the ring the markers sit on, of the viewport's shorter side
+constexpr float kBaseHeight = 1.8f;  // metres: what the head and body points are taken from, whatever the ESP box's height
 constexpr float kChestShare = 0.66f; // of the height: the body, where the assist pulls
+constexpr auto kHitShow = std::chrono::seconds(4);  // a label shown for hits stays this long after the last one
 constexpr float kCone = 30.0f;       // degrees from the crosshair an enemy is taken in by the auto headshot
 constexpr float kPull = 1.0f;        // of the turn to the head, a frame
 constexpr float kAssistCone[] = {0.0f, 6.0f, 10.0f, 15.0f};   // degrees, by the AIM ASSIST level
@@ -73,6 +75,8 @@ struct Seen {
     uint32_t who;
     std::chrono::steady_clock::time_point at;
     float peak;  // the most health it was seen with, the health bar's full
+    float last;  // its health at the last update, a drop is a hit
+    std::chrono::steady_clock::time_point hit_at;  // the last hit
 };
 Seen g_seen[kMaxEnemies];
 size_t g_count;
@@ -94,6 +98,13 @@ constexpr size_t kMaxVertices = kMaxEnemies * kSegments * 6 + 64;
 
 float Height() { return float(std::clamp(game::Opt().esp_height, 100u, 250u)) / 100.0f; }
 
+// something of the ESP is on: the enemies' updates are noted for it, and for the aim cheats
+bool Drawing() {
+    const game::Options& o = game::Opt();
+    return o.esp_style || o.esp_arrows || o.esp_health || o.esp_label;
+}
+bool Wanted() { return Drawing() || game::Opt().aimbot || game::Opt().aim_assist; }
+
 // a living enemy: one an AI drives, which leaves the allies out
 bool Target(uint32_t who) {
     if (R32(who + kCharKind) != kEnemyKind || R32(who + kCharDying)) return false;
@@ -107,19 +118,22 @@ void Remember(uint32_t who) {
         if (g_seen[i].who == who) {
             g_seen[i].at = now;
             g_seen[i].peak = std::max(g_seen[i].peak, health);
+            if (health < g_seen[i].last - 0.001f) g_seen[i].hit_at = now;
+            g_seen[i].last = health;
             return;
         }
     // each character once in the log, to tell allies from enemies by what they have
-    LOGR("esp: character %08X kind %u ai %08X health %.0f", who, R32(who + kCharKind), R32(who + kCharAi), health);
+    filelog::Write("esp", "character %08X kind %u ai %08X health %.0f", who, R32(who + kCharKind), R32(who + kCharAi), health);
+    const auto long_ago = now - std::chrono::hours(1);
     if (g_count < kMaxEnemies) {
-        g_seen[g_count++] = {who, now, health};
+        g_seen[g_count++] = {who, now, health, health, long_ago};
         return;
     }
     // full with the ESP off, which keeps the list: the one seen longest ago goes
     Seen* oldest = g_seen;
     for (Seen& s : g_seen)
         if (s.at < oldest->at) oldest = &s;
-    *oldest = {who, now, health};
+    *oldest = {who, now, health, health, long_ago};
 }
 
 // clip space; false behind the camera
@@ -194,7 +208,8 @@ struct Turn {
     bool found = false;
 };
 
-Turn Nearest(float cone, float share) {
+// share of kBaseHeight above the feet, side metres to the right of the aim point on the screen (left when negative)
+Turn Nearest(float cone, float share, float side) {
     Turn turn;
     auto now = std::chrono::steady_clock::now();
     float best = cone;
@@ -202,7 +217,8 @@ Turn Nearest(float cone, float share) {
         uint32_t who = g_seen[i].who;
         if (now - g_seen[i].at > kSeen || !Target(who)) continue;
         const float* at = &G<float>(who + kCharPosition);
-        float point[3] = {at[0], at[1] + Height() * share, at[2]}, clip[4];
+        float point[3] = {at[0] + g_view[0] * side, at[1] + kBaseHeight * share + g_view[4] * side, at[2] + g_view[8] * side};
+        float clip[4];
         if (!Clip(point, clip)) continue;
         float y = -std::atan(clip[0] / clip[3] / g_projection[0]) * kDegrees;
         float p = -std::atan(clip[1] / clip[3] / g_projection[5]) * kDegrees;
@@ -242,10 +258,11 @@ void Aimbot(X86Context& ctx) {
     Turn turn;
     float pull = 0;
     if (Opt().aimbot && aiming) {
-        turn = Nearest(kCone, float(std::clamp(Opt().head_height, 40u, 100u)) / 100.0f);
+        turn = Nearest(kCone, float(std::clamp(Opt().head_height, 40u, 100u)) / 100.0f,
+                       float(int(std::clamp(Opt().head_offset, 0u, 60u)) - 30) / 100.0f);
         pull = kPull;
     } else if (level && firing) {  // not for aiming in: only a shot that is fired is helped
-        turn = Nearest(kAssistCone[level], kChestShare);
+        turn = Nearest(kAssistCone[level], kChestShare, 0.0f);
         pull = kAssistPull[level];
     }
     if (!turn.found) return;
@@ -259,7 +276,7 @@ void Aimbot(X86Context& ctx) {
 // then its distance
 void EspOverlay() {
     uint32_t mode = std::min(Opt().esp_label, 3u);
-    if (!Opt().esp || !mode) return;
+    if (!mode) return;
     Labels l;
     {
         std::lock_guard lock(g_labels_lock);
@@ -324,12 +341,8 @@ void DrawEsp(X86Context& ctx, float unit) {
     float on[4], off[4];
     Unpack(Opt().esp_on_color, on);
     Unpack(Opt().esp_off_color, off);
-
-    const bool draw_esp = Opt().esp && g_camera && R32(kWorld) != 0;
-    const bool draw_cross = Opt().crosshair && g_camera && R32(kWorld) != 0;
-
-    if (!draw_esp && !draw_cross) {
-        Publish(nullptr, 0, on);  // clear any labels left from a previous frame
+    if (!Drawing() || !g_camera || !R32(kWorld)) {
+        Publish(nullptr, 0, on);
         return;
     }
 
@@ -351,126 +364,85 @@ void DrawEsp(X86Context& ctx, float unit) {
         v = Segment(v, x0, y0, x1, y1, width);
         for (size_t i = before; i < size_t(v - first); i++) std::memcpy(colour[i], rgba, 16);
     };
-    // a filled square (two triangles) with a colour for each point
-    auto add_square = [&](float cx, float cy, float s, const float rgba[4]) {
-        float h = s * 0.5f;
-        const float q[4][2] = {{cx - h, cy - h}, {cx + h, cy - h}, {cx + h, cy + h}, {cx - h, cy + h}};
-        for (int i : {0, 1, 2, 2, 1, 3}) {
-            *v = {q[i][0], q[i][1]};
-            std::memcpy(colour[v - first], rgba, 16);
-            v++;
+    Label labels[kMaxEnemies];
+    size_t labelled = 0;
+    const float back[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+    const uint32_t style = std::min(Opt().esp_style, 3u), label_mode = std::min(Opt().esp_label, 3u);
+    const float width = float(std::min(Opt().esp_width, 30u)) / 10.0f * unit;  // the box and the line
+    const float tail = kThickness * unit * 1.6f, bar = kBarThickness * unit;
+    float height = Height();
+    auto now = std::chrono::steady_clock::now();
+    size_t kept = 0;
+    for (size_t i = 0; i < g_count; i++) {
+        uint32_t who = g_seen[i].who;
+        if (now - g_seen[i].at > kSeen || !Target(who)) continue;
+        Seen entry = g_seen[kept++] = g_seen[i];
+        const float* at = &G<float>(who + kCharPosition);
+        float chest[3] = {at[0], at[1] + height * kChestShare, at[2]}, clip[4];
+        bool front = Clip(chest, clip);
+        bool inside = front && std::fabs(clip[0]) <= clip[3] && std::fabs(clip[1]) <= clip[3];
+        if (!inside) {
+            if (!Opt().esp_arrows) continue;
+            // out of the view: one arrowhead on a ring round the middle, as the direction cues of other shooters. In
+            // front of the camera (beside the picture, above or below) it sits where the enemy is on the screen and
+            // is the head alone; behind the player it sits on the lower half by the enemy's bearing, with a short
+            // tail towards the middle
+            float dir[2];
+            if (front) {
+                dir[0] = clip[0] / clip[3];
+                dir[1] = -clip[1] / clip[3];
+            } else {
+                float eye[3];
+                Eye(chest, eye);
+                dir[0] = eye[0];
+                dir[1] = -eye[2];
+            }
+            float length = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1]);
+            if (!std::isfinite(length)) continue;
+            if (length < 1e-4f) dir[0] = 0, dir[1] = front ? -1.0f : 1.0f, length = 1;
+            float ux = dir[0] / length, uy = dir[1] / length;
+            float ring = kRing * std::min(vw, vh), h = kArrow * unit;
+            float mx = vx + vw * 0.5f + ux * ring, my = vy + vh * 0.5f + uy * ring;
+            // the head points out from the middle, its base a little wider than long
+            const float pts[3][2] = {{mx + ux * h, my + uy * h},
+                                     {mx - ux * h * 0.5f - uy * h * 0.8f, my - uy * h * 0.5f + ux * h * 0.8f},
+                                     {mx - ux * h * 0.5f + uy * h * 0.8f, my - uy * h * 0.5f - ux * h * 0.8f}};
+            size_t before = size_t(v - first);
+            for (const auto& q : pts) *v++ = {q[0], q[1]};
+            for (size_t i = before; i < size_t(v - first); i++) std::memcpy(colour[i], off, 16);
+            if (!front) add(mx - ux * h * 0.5f, my - uy * h * 0.5f, mx - ux * h * 2.2f, my - uy * h * 2.2f, tail, off);
+            continue;
         }
-    };
-
-    // ---- ESP (drawn first, so the crosshair sits on top) ----
-    if (draw_esp) {
-        Label labels[kMaxEnemies];
-        size_t labelled = 0;
-        const float back[4] = {0.1f, 0.1f, 0.1f, 1.0f};
-        float width = kThickness * unit, bar = kBarThickness * unit;
-        float height = Height();
-        auto now = std::chrono::steady_clock::now();
-        size_t kept = 0;
-        for (size_t i = 0; i < g_count; i++) {
-            uint32_t who = g_seen[i].who;
-            if (now - g_seen[i].at > kSeen || !Target(who)) continue;
-            Seen entry = g_seen[kept++] = g_seen[i];
-            const float* at = &G<float>(who + kCharPosition);
-            float chest[3] = {at[0], at[1] + height * kChestShare, at[2]}, clip[4];
-            bool front = Clip(chest, clip);
-            bool inside = front && std::fabs(clip[0]) <= clip[3] && std::fabs(clip[1]) <= clip[3];
-            if (!inside) {
-                // out of the view: one arrowhead on a ring round the middle, as the direction cues of other shooters. In
-                // front of the camera (beside the picture, above or below) it sits where the enemy is on the screen and
-                // is the head alone; behind the player it sits on the lower half by the enemy's bearing, with a short
-                // tail towards the middle
-                float dir[2];
-                if (front) {
-                    dir[0] = clip[0] / clip[3];
-                    dir[1] = -clip[1] / clip[3];
-                } else {
-                    float eye[3];
-                    Eye(chest, eye);
-                    dir[0] = eye[0];
-                    dir[1] = -eye[2];
-                }
-                float length = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1]);
-                if (!std::isfinite(length)) continue;
-                if (length < 1e-4f) dir[0] = 0, dir[1] = front ? -1.0f : 1.0f, length = 1;
-                float ux = dir[0] / length, uy = dir[1] / length;
-                float ring = kRing * std::min(vw, vh), h = kArrow * unit;
-                float mx = vx + vw * 0.5f + ux * ring, my = vy + vh * 0.5f + uy * ring;
-                // the head points out from the middle, its base a little wider than long
-                const float pts[3][2] = {{mx + ux * h, my + uy * h},
-                                         {mx - ux * h * 0.5f - uy * h * 0.8f, my - uy * h * 0.5f + ux * h * 0.8f},
-                                         {mx - ux * h * 0.5f + uy * h * 0.8f, my - uy * h * 0.5f - ux * h * 0.8f}};
-                size_t before = size_t(v - first);
-                for (const auto& q : pts) *v++ = {q[0], q[1]};
-                for (size_t i = before; i < size_t(v - first); i++) std::memcpy(colour[i], off, 16);
-                if (!front) add(mx - ux * h * 0.5f, my - uy * h * 0.5f, mx - ux * h * 2.2f, my - uy * h * 2.2f, width * 1.6f, off);
-                continue;
-            }
-            float feet[3] = {at[0], at[1], at[2]};
-            float top[3] = {at[0], at[1] + height, at[2]};
-            float f[2], h[2];
-            if (!Project(feet, vx, vy, vw, vh, f) || !Project(top, vx, vy, vw, vh, h)) continue;
-            float hp = G<float>(who + kCharHealth);
-            float dx = at[0] - mine[0], dy = at[1] - mine[1], dz = at[2] - mine[2];
-            if (labelled < kMaxEnemies) {
-                labels[labelled++] = {(f[0] - vx) / vw, (h[1] - vy) / vh, hp,
-                                      entry.peak > 0 ? std::clamp(hp / entry.peak, 0.0f, 1.0f) : 1.0f,
-                                      std::sqrt(dx * dx + dy * dy + dz * dz)};
-            }
-            float half = (f[1] - h[1]) * kBoxWidth * 0.5f;
-            float left = f[0] - half, right = f[0] + half;
-            add(vx + vw * 0.5f, vy + vh, f[0], f[1], width, on);
-            add(left, h[1], right, h[1], width, on);
-            add(left, f[1], right, f[1], width, on);
-            add(left, h[1], left, f[1], width, on);
-            add(right, h[1], right, f[1], width, on);
-            if (Opt().esp_health) {
-                float frac = entry.peak > 0 ? std::clamp(G<float>(who + kCharHealth) / entry.peak, 0.0f, 1.0f) : 1.0f;
-                float y = h[1] - kBarGap * unit - bar * 0.5f;
-                const float fill[4] = {std::min(1.0f, 2 * (1 - frac)), std::min(1.0f, 2 * frac), 0.0f, 1.0f};
-                add(left, y, right, y, bar, back);
-                if (frac > 0) add(left, y, left + (right - left) * frac, y, bar, fill);
+        float feet[3] = {at[0], at[1], at[2]};
+        float top[3] = {at[0], at[1] + height, at[2]};
+        float f[2], h[2];
+        if (!Project(feet, vx, vy, vw, vh, f) || !Project(top, vx, vy, vw, vh, h)) continue;
+        float hp = G<float>(who + kCharHealth);
+        float dx = at[0] - mine[0], dy = at[1] - mine[1], dz = at[2] - mine[2];
+        // the plate: always, or only for a few seconds after a hit; AUTO is always with a box or a line, else after a hit
+        bool hit = now - entry.hit_at < kHitShow;
+        uint32_t show = std::min(Opt().esp_label_show, 2u);
+        if (label_mode && (show == 1 || (show == 0 && style) || hit))
+            labels[labelled++] = {(f[0] - vx) / vw, (h[1] - vy) / vh, hp,
+                                  entry.peak > 0 ? std::clamp(hp / entry.peak, 0.0f, 1.0f) : 1.0f,
+                                  std::sqrt(dx * dx + dy * dy + dz * dz)};
+        float half = (f[1] - h[1]) * kBoxWidth * 0.5f;
+        float left = f[0] - half, right = f[0] + half;
+        if (width > 0) {
+            if (style & 2) add(vx + vw * 0.5f, vy + vh, f[0], f[1], width, on);
+            if (style & 1) {
+                add(left, h[1], right, h[1], width, on);
+                add(left, f[1], right, f[1], width, on);
+                add(left, h[1], left, f[1], width, on);
+                add(right, h[1], right, f[1], width, on);
             }
         }
-        g_count = kept;
-        Publish(labels, labelled, on);
-    } else {
-        Publish(nullptr, 0, on);  // ESP off: drop any plates
-    }
-
-    // ---- CROSSHAIR (drawn on top of the ESP) ----
-    if (draw_cross) {
-        float rgba[4];
-        Unpack(Opt().crosshair_color, rgba);
-        rgba[3] = 1.0f;  // opaque
-        float cx = vx + vw * 0.5f, cy = vy + vh * 0.5f;
-        float size = kCrossBaseSize * float(std::clamp(Opt().crosshair_size, 10u, 500u)) / 100.0f * unit;
-        float th   = kCrossThickness * unit;
-        uint32_t mode = Opt().crosshair_mode > 2 ? 0 : Opt().crosshair_mode;
-        if (mode == 0) {
-            // dot: a small filled square at the middle
-            add_square(cx, cy, size * 0.6f, rgba);
-        } else if (mode == 1) {
-            // cross: four arms with a gap in the middle
-            float gap = size * 0.25f;
-            add(cx - gap - size, cy, cx - gap, cy, th, rgba);
-            add(cx + gap, cy, cx + gap + size, cy, th, rgba);
-            add(cx, cy - gap - size, cx, cy - gap, th, rgba);
-            add(cx, cy + gap, cx, cy + gap + size, th, rgba);
-        } else {
-            // star: three axes (0/60/120 deg) with a gap, plus a small centre dot
-            float gap = size * 0.3f;
-            for (int i = 0; i < 3; i++) {
-                float ang = float(i) * 3.14159265f / 3.0f;
-                float co = std::cos(ang), si = std::sin(ang);
-                add(cx + gap * co, cy + gap * si, cx + (gap + size) * co, cy + (gap + size) * si, th, rgba);
-                add(cx - gap * co, cy - gap * si, cx - (gap + size) * co, cy - (gap + size) * si, th, rgba);
-            }
-            add_square(cx, cy, size * 0.25f, rgba);
+        if (Opt().esp_health) {
+            float frac = entry.peak > 0 ? std::clamp(G<float>(who + kCharHealth) / entry.peak, 0.0f, 1.0f) : 1.0f;
+            float y = h[1] - kBarGap * unit - bar * 0.5f;
+            const float fill[4] = {std::min(1.0f, 2 * (1 - frac)), std::min(1.0f, 2 * frac), 0.0f, 1.0f};
+            add(left, y, right, y, bar, back);
+            if (frac > 0) add(left, y, left + (right - left) * frac, y, bar, fill);
         }
     }
 
@@ -492,8 +464,7 @@ void DrawEsp(X86Context& ctx, float unit) {
 X86_EXTERN_FUNC(__imp__sub_001DFD90);
 X86_FUNC(sub_001DFD90) {
     uint32_t who = ctx.ecx;
-    if ((game::Opt().esp || game::Opt().aimbot || game::Opt().aim_assist) && who && R32(who + kCharKind) == kEnemyKind &&
-        !R32(who + kCharDying))
+    if (Wanted() && who && R32(who + kCharKind) == kEnemyKind && !R32(who + kCharDying))
         Remember(who);
     __imp__sub_001DFD90(ctx, base);
 }
