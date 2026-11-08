@@ -13,27 +13,21 @@ using namespace layout;
 
 namespace {
 
-// character: the player is the one in the world container, its kind 2
 constexpr uint32_t kCharKind = 0xC4;
-constexpr uint32_t kCharGrenades = 0x286;  // uint16
+constexpr uint32_t kCharGrenades = 0x286;
 constexpr uint16_t kGrenadeMax = 9;
-constexpr uint32_t kCharHealth = 0x2F0;    // float, the difficulty's full at most
-constexpr uint32_t kCharDying = 0x384;     // not 0 once it is killed
-// byte the scripts set: the player's damage calls (its class's 0x1ED990, 0x1ED700, 0x1ED2B0, 0x1ED5D0, and
-// 0x1ED1E0) take nothing while it is
+constexpr uint32_t kCharHealth = 0x2F0;
+constexpr uint32_t kCharDying = 0x384;
 constexpr uint32_t kCharInvulnerable = 0x8F2;
 constexpr uint32_t kPlayerKind = 2;
 
-constexpr uint32_t kDifficulty = 0x2014C;  // in the game object, 0 easy to 3 black ops
-// full health, as 0x13F10 scales 1.0: easy and normal, then hard and black ops
+constexpr uint32_t kDifficulty = 0x2014C;
 constexpr float kFullHealth[] = {1200.0f, 750.0f};
 
 uint32_t Player() { return R32(kWorld) ? R32(kWorld) + kWorldPlayer : 0; }
 
 float FullHealth() { return kFullHealth[R32(R32(kGame) + kDifficulty) >= 2]; }
 
-// One-hit kill: a hit of the player's on another character starts from a sliver of health, any damage kills.
-// A hit that took nothing gives the health back
 constexpr float kSliver = 0.001f;
 
 struct Doomed {
@@ -57,12 +51,9 @@ void Spare(const Doomed& kept) {
     if (health > 0) health = kept.health - (kSliver - health);
 }
 
-// diagnosis for a headshot that counts as one (SaveData/logs/hit_test.log): the first hits of the player's, with the seven arguments of the
-// bullet call (hex and float, and three floats behind each that points into the guest) and the victim's feet.
-// Shoot an enemy in the head five times and in the body five, then send the log: the argument that differs is
-// the hit zone, the one that is a point on the body is where the bullet landed
-// the 64 MB of memory is at the bottom of the address space and again from 0x80000000
-bool GuestPointer(uint32_t v) { return !(v & 3) && ((v >= 0x10000 && v < 0x04000000) || (v >= 0x80000000 && v < 0x84000000)); }
+bool GuestPointer(uint32_t v) {
+    return !(v & 3) && ((v >= 0x10000 && v < 0x04000000) || (v >= 0x80000000 && v < 0x84000000));
+}
 
 void LogHit(uint32_t victim, uint32_t attacker, uint32_t esp) {
     static int logged = 0;
@@ -70,8 +61,8 @@ void LogHit(uint32_t victim, uint32_t attacker, uint32_t esp) {
     if (logged >= 80 || !me || attacker != me || victim == me) return;
     logged++;
     const float* feet = &G<float>(victim + 0xA0);
-    filelog::Write("hit_test", "hit %d: victim %08X feet %.2f %.2f %.2f health %.1f", logged, victim, feet[0], feet[1], feet[2],
-         G<float>(victim + kCharHealth));
+    filelog::Write("hit_test", "hit %d: victim %08X feet %.2f %.2f %.2f health %.1f", logged, victim, feet[0], feet[1],
+                   feet[2], G<float>(victim + kCharHealth));
     for (int i = 0; i < 7; i++) {
         uint32_t v = R32(esp + 4 + 4 * i);
         float f;
@@ -85,17 +76,14 @@ void LogHit(uint32_t victim, uint32_t attacker, uint32_t esp) {
     }
 }
 
-bool g_invulnerable;  // the flag is ours, cleared when god mode goes off
+bool g_invulnerable;
 
 }  // namespace
 
-// The player's update, a frame (ecx the player, its class's own): god mode fills the health and holds the flag
-// its damage calls test
 X86_EXTERN_FUNC(__imp__sub_001E5FA0);
 X86_FUNC(sub_001E5FA0) {
     uint32_t me = ctx.ecx;
     if (me && me == Player() && R32(me + kCharKind) == kPlayerKind) {
-        // infinite grenades: the count is filled to the maximum on its own, a throw needs one in hand
         if (game::Opt().infinite_grenades && G<uint16_t>(me + kCharGrenades) < kGrenadeMax)
             G<uint16_t>(me + kCharGrenades) = kGrenadeMax;
         if (game::Opt().god_mode && !R32(me + kCharDying)) {
@@ -111,8 +99,6 @@ X86_FUNC(sub_001E5FA0) {
     __imp__sub_001E5FA0(ctx, base);
 }
 
-// A soldier takes a bullet (ecx the victim, the sixth of seven arguments its attacker, ret 0x1C): the
-// characters' class, the player's has its own
 X86_EXTERN_FUNC(__imp__sub_001E74B0);
 X86_FUNC(sub_001E74B0) {
     LogHit(ctx.ecx, R32(ctx.esp + 0x18), ctx.esp);
@@ -121,16 +107,17 @@ X86_FUNC(sub_001E74B0) {
     Spare(doomed);
 }
 
-// A character's animation event (64-bit hash, then a pointer to the character): the throw takes a grenade
-// (0x1E8934), the cheat puts the player's back. RAPID FIRE EXTRA: a throw also keeps the count and asks the animation
-// controller to fast-forward the throw clip (hooks.cpp's sub_0017B130), so the next throw can start at once
+// A character's animation event: the throw takes a grenade, the cheat puts the player's back. RAPID FIRE EXTRA
+// (rapid_fire_extra > 1): a throw keeps the count and asks the animation controller (hooks.cpp's sub_0017B130) to
+// fast-forward the throw clip, so the next throw can start at once. rapid_fire_extra is a uint32_t now (options.h):
+// 1 = OFF, 2-999 = active (999 = INFINITE). Grenade throws are instant for every rapid_fire_extra > 1
 X86_EXTERN_FUNC(__imp__sub_001E8830);
 X86_FUNC(sub_001E8830) {
     uint32_t who = R32(ctx.esp + 0xC);
     uint32_t me = who ? R32(who) : 0;
     bool is_player = me && me == Player();
     uint16_t before = is_player ? G<uint16_t>(me + kCharGrenades) : 0;
-    // keep the count when either cheat wants it: INFINITE GRENADES, or RAPID FIRE EXTRA (any level but OFF throws forever)
+    // keep the count when either cheat wants it: INFINITE GRENADES, or RAPID FIRE EXTRA at any level above OFF
     bool keep = is_player && (game::Opt().infinite_grenades || game::Opt().rapid_fire_extra > 1);
     __imp__sub_001E8830(ctx, base);
     uint16_t after = is_player ? G<uint16_t>(me + kCharGrenades) : 0;
